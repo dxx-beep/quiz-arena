@@ -658,17 +658,82 @@ body {
   transition: width 0.1s linear, background-color 0.3s;
 }
 
+.question-header-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
 .question-text-box {
   font-size: 1.3rem;
   font-weight: 700;
   line-height: 1.45;
-  margin-bottom: 1.75rem;
   min-height: 65px;
   display: flex;
   align-items: center;
   user-select: none;
   -webkit-user-select: none;
   position: relative;
+  flex-grow: 1;
+}
+
+.btn-speak-q {
+  padding: 0.5rem 0.85rem;
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  white-space: nowrap;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card-hover);
+  border: 1px solid var(--border);
+  color: var(--text-main);
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.btn-speak-q:hover {
+  background: var(--primary-light);
+  border-color: var(--primary);
+  color: var(--primary);
+  transform: translateY(-1px);
+}
+
+.btn-speak-q.speaking {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+  animation: pulseSpeaking 1s infinite alternate;
+}
+
+@keyframes pulseSpeaking {
+  from { opacity: 0.85; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1.03); }
+}
+
+.audio-riddle-box {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.9rem 1.2rem;
+  background: var(--primary-light);
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius-sm);
+  margin-bottom: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.btn-play-audio-sample {
+  padding: 0.6rem 1.1rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+
+.audio-hint-txt {
+  font-size: 0.85rem;
+  color: var(--text-muted);
 }
 
 .typewriter-cursor {

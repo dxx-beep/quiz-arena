@@ -436,6 +436,30 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('gameScoreBadge').textContent = `🏆 ${state.solo.score} очок`;
     document.getElementById('gameQuestionText').textContent = q.question;
 
+    window.soundController.stopSpeaking();
+    const btnSpeakQuestion = document.getElementById('btnSpeakQuestion');
+    if (btnSpeakQuestion) {
+      btnSpeakQuestion.classList.remove('speaking');
+      document.getElementById('speakIcon').textContent = '🔊';
+    }
+
+    const audioRiddleBox = document.getElementById('audioRiddleBox');
+    if (q.soundSample) {
+      audioRiddleBox.style.display = 'flex';
+      const btnPlayRiddleSound = document.getElementById('btnPlayRiddleSound');
+      btnPlayRiddleSound.onclick = () => {
+        window.soundController.playAcousticSample(q.soundSample);
+      };
+      // Auto play audio snippet shortly after reveal
+      setTimeout(() => {
+        if (state.currentView === 'screenGame') {
+          window.soundController.playAcousticSample(q.soundSample);
+        }
+      }, 700);
+    } else {
+      audioRiddleBox.style.display = 'none';
+    }
+
     const optContainer = document.getElementById('gameOptionsContainer');
     optContainer.innerHTML = '';
     const letters = ['A', 'B', 'C', 'D'];
@@ -1216,6 +1240,29 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('gameScoreBadge').textContent = `🏆 ${state.multi.score} очок`;
     document.getElementById('gameQuestionText').textContent = q.question;
 
+    window.soundController.stopSpeaking();
+    const btnSpeakQuestion = document.getElementById('btnSpeakQuestion');
+    if (btnSpeakQuestion) {
+      btnSpeakQuestion.classList.remove('speaking');
+      document.getElementById('speakIcon').textContent = '🔊';
+    }
+
+    const audioRiddleBox = document.getElementById('audioRiddleBox');
+    if (q.soundSample) {
+      audioRiddleBox.style.display = 'flex';
+      const btnPlayRiddleSound = document.getElementById('btnPlayRiddleSound');
+      btnPlayRiddleSound.onclick = () => {
+        window.soundController.playAcousticSample(q.soundSample);
+      };
+      setTimeout(() => {
+        if (state.currentView === 'screenGame') {
+          window.soundController.playAcousticSample(q.soundSample);
+        }
+      }, 700);
+    } else {
+      audioRiddleBox.style.display = 'none';
+    }
+
     const optContainer = document.getElementById('gameOptionsContainer');
     optContainer.innerHTML = '';
     const letters = ['A', 'B', 'C', 'D'];
@@ -1843,6 +1890,40 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => {
       joinLobbyByCode(joinParam);
     }, 600);
+  }
+
+  // Speech Synthesis: Read Question Button
+  const btnSpeakQuestion = document.getElementById('btnSpeakQuestion');
+  let isSpeaking = false;
+
+  if (btnSpeakQuestion) {
+    btnSpeakQuestion.addEventListener('click', () => {
+      window.soundController.playClick();
+      if (isSpeaking) {
+        window.soundController.stopSpeaking();
+        btnSpeakQuestion.classList.remove('speaking');
+        document.getElementById('speakIcon').textContent = '🔊';
+        isSpeaking = false;
+      } else {
+        const q = state.multi.room ? state.multi.myQuestions[state.multi.currentIndex] : state.solo.questions[state.solo.currentIndex];
+        if (!q) return;
+
+        const speakText = `${q.question}. Варіанти: A: ${q.options[0]}. B: ${q.options[1]}. C: ${q.options[2]}. D: ${q.options[3]}.`;
+        window.soundController.speakText(
+          speakText,
+          () => {
+            isSpeaking = true;
+            btnSpeakQuestion.classList.add('speaking');
+            document.getElementById('speakIcon').textContent = '⏹️';
+          },
+          () => {
+            isSpeaking = false;
+            btnSpeakQuestion.classList.remove('speaking');
+            document.getElementById('speakIcon').textContent = '🔊';
+          }
+        );
+      }
+    });
   }
 
   // Anti-cheat: prevent right-click context menu & drag selection during gameplay

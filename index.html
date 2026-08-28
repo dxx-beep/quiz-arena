@@ -254,9 +254,23 @@
           <div class="timer-bar-fill" id="gameTimerBar"></div>
         </div>
 
-        <!-- Question text -->
-        <div class="question-text-box">
-          <p id="gameQuestionText">Завантаження запитання...</p>
+        <!-- Question text & Audio controls -->
+        <div class="question-header-row">
+          <div class="question-text-box">
+            <p id="gameQuestionText">Завантаження запитання...</p>
+          </div>
+          <button class="btn btn-secondary btn-speak-q" id="btnSpeakQuestion" title="Прослухати питання голосом">
+            <span id="speakIcon">🔊</span>
+            <span class="speak-txt">Озвучити</span>
+          </button>
+        </div>
+
+        <!-- Audio Riddle Interactive Player (for sound-based riddles) -->
+        <div id="audioRiddleBox" class="audio-riddle-box" style="display: none;">
+          <button class="btn btn-primary btn-play-audio-sample" id="btnPlayRiddleSound">
+            <span>🎧 Відтворити аудіо-загадку</span>
+          </button>
+          <span class="audio-hint-txt" id="audioRiddleHint">Натисніть кнопку, щоб прослухати звук і відповісти</span>
         </div>
 
         <!-- Options -->
@@ -472,8 +486,8 @@
   <!-- Scripts -->
   <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
-  <script src="questions.js?v=7.0.0"></script>
-  <script src="audio.js?v=7.0.0"></script>
-  <script src="app.js?v=7.0.0"></script>
+  <script src="questions.js?v=8.0.0"></script>
+  <script src="audio.js?v=8.0.0"></script>
+  <script src="app.js?v=8.0.0"></script>
 </body>
 </html>

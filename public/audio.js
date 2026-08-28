@@ -112,16 +112,16 @@ class SoundController {
 
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
-    osc.type = 'sine';
+    osc.type = 'triangle';
     osc.frequency.setValueAtTime(880, this.ctx.currentTime);
 
-    gain.gain.setValueAtTime(0.2, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.3);
+    gain.gain.setValueAtTime(0.18, this.ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.35);
 
     osc.connect(gain);
     gain.connect(this.ctx.destination);
     osc.start();
-    osc.stop(this.ctx.currentTime + 0.3);
+    osc.stop(this.ctx.currentTime + 0.35);
   }
 
   playVictory() {
@@ -131,26 +131,118 @@ class SoundController {
 
     const now = this.ctx.currentTime;
     const notes = [
-      { f: 523.25, d: 0.12, t: 0 },
-      { f: 659.25, d: 0.12, t: 0.12 },
-      { f: 783.99, d: 0.12, t: 0.24 },
-      { f: 1046.50, d: 0.4, t: 0.36 }
+      { f: 523.25, d: 0.12 }, // C5
+      { f: 659.25, d: 0.12 }, // E5
+      { f: 783.99, d: 0.12 }, // G5
+      { f: 1046.5, d: 0.35 }  // C6
     ];
 
+    let t = now;
     notes.forEach(n => {
       const osc = this.ctx.createOscillator();
       const gain = this.ctx.createGain();
       osc.type = 'triangle';
-      osc.frequency.setValueAtTime(n.f, now + n.t);
+      osc.frequency.setValueAtTime(n.f, t);
 
-      gain.gain.setValueAtTime(0.2, now + n.t);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + n.t + n.d);
+      gain.gain.setValueAtTime(0.18, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + n.d);
 
       osc.connect(gain);
       gain.connect(this.ctx.destination);
-      osc.start(now + n.t);
-      osc.stop(now + n.t + n.d);
+      osc.start(t);
+      osc.stop(t + n.d);
+      t += n.d * 0.9;
     });
+  }
+
+  // -------------------------------------------------------------
+  // SPEECH SYNTHESIS (VOICE READING IN UKRAINIAN)
+  // -------------------------------------------------------------
+  speakText(text, onStart, onEnd) {
+    if (!('speechSynthesis' in window)) return;
+    window.speechSynthesis.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'uk-UA';
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    const voices = window.speechSynthesis.getVoices();
+    const ukVoice = voices.find(v => v.lang.includes('uk') || v.lang.includes('UA'));
+    if (ukVoice) {
+      utterance.voice = ukVoice;
+    }
+
+    if (onStart) utterance.onstart = onStart;
+    if (onEnd) utterance.onend = onEnd;
+    utterance.onerror = onEnd;
+
+    window.speechSynthesis.speak(utterance);
+  }
+
+  stopSpeaking() {
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+  }
+
+  // -------------------------------------------------------------
+  // ACOUSTIC RIDDLE SOUND EFFECTS (MORSE CODE, FREQUENCIES, MELODIES)
+  // -------------------------------------------------------------
+  playAcousticSample(type) {
+    this.init();
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+
+    if (type === 'morse_sos') {
+      // 3 short, 3 long, 3 short (... --- ...)
+      const pattern = [0.1, 0.1, 0.1, 0.3, 0.3, 0.3, 0.1, 0.1, 0.1];
+      let t = now;
+      pattern.forEach((dur, idx) => {
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(800, t);
+        gain.gain.setValueAtTime(0.18, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + dur);
+        t += dur + 0.12;
+      });
+    } else if (type === 'beep_count_7') {
+      // 7 distinct beeps for counting
+      for (let i = 0; i < 7; i++) {
+        const t = now + i * 0.35;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(650, t);
+        gain.gain.setValueAtTime(0.15, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.15);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.15);
+      }
+    } else if (type === 'ascending_scale') {
+      // 4 ascending notes
+      const notes = [261.63, 329.63, 392.00, 523.25];
+      notes.forEach((f, i) => {
+        const t = now + i * 0.25;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(f, t);
+        gain.gain.setValueAtTime(0.18, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + 0.22);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + 0.22);
+      });
+    }
   }
 }
 
