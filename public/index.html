@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>QuizArena — Платформа онлайн-тестів та квізів</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- Header -->
+  <header class="app-header">
+    <div class="container header-content">
+      <div class="logo" id="btnLogoHome">
+        <span style="font-size: 1.6rem;">🎯</span>
+        <span>Quiz<span style="color: var(--secondary)">Arena</span></span>
+        <span class="logo-badge">UA</span>
+      </div>
+
+      <div class="header-actions">
+        <!-- Player Profile Chip -->
+        <div class="player-chip" id="btnOpenProfile" title="Змінити ім'я та аватар">
+          <span class="avatar" id="headerPlayerAvatar">🦊</span>
+          <span id="headerPlayerName">Гравець</span>
+        </div>
+
+        <!-- Sound Toggle -->
+        <button class="btn-icon" id="btnToggleSound" title="Звукові ефекти">
+          🔊
+        </button>
+
+        <!-- Theme Toggle -->
+        <button class="btn-icon" id="btnToggleTheme" title="Змінити тему">
+          🌙
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="container">
+
+    <!-- SCREEN 1: HOME -->
+    <section id="screenHome" class="view-screen active">
+      <div class="hero-card">
+        <h1 class="hero-title">Перевір свої знання в <span>QuizArena</span></h1>
+        <p class="hero-desc">
+          Проходь захопливі тести на 10, 20 або 40 запитань наодинці або змагайся з друзями в реальному часі у спільних лобі!
+        </p>
+        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
+          <button class="btn btn-primary btn-lg" id="btnGoSolo">
+            <span>🎯 Одиночний режим</span>
+          </button>
+          <button class="btn btn-secondary btn-lg" id="btnOpenCreateLobbyModal">
+            <span>➕ Створити лобі</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Action Cards -->
+      <div class="actions-grid">
+        <!-- Solo Card -->
+        <div class="action-card">
+          <div>
+            <div class="action-icon">🧠</div>
+            <h3 class="action-title">Одиночна гра</h3>
+            <p class="action-text">
+              Обирай тему, зручну кількість питань (10, 20 або 40) і тренуйся у власному темпі з детальними поясненнями.
+            </p>
+          </div>
+          <button class="btn btn-primary" id="btnCardSolo">Розпочати Solo</button>
+        </div>
+
+        <!-- Lobbies List Card -->
+        <div class="action-card">
+          <div>
+            <div class="action-icon">🌐</div>
+            <h3 class="action-title">Список лобі</h3>
+            <p class="action-text">
+              Переглядай активні публічні кімнати, обирай потрібний тест та змагайся з іншими гравцями онлайн.
+            </p>
+          </div>
+          <button class="btn btn-secondary" id="btnGoLobbies">Переглянути кімнати</button>
+        </div>
+
+        <!-- Join by Code Card -->
+        <div class="action-card">
+          <div>
+            <div class="action-icon">🔑</div>
+            <h3 class="action-title">Приєднатися за кодом</h3>
+            <p class="action-text">
+              Маєш код кімнати від друга? Введи його тут, щоб миттєво підключитися до гри!
+            </p>
+          </div>
+          <div class="join-code-box">
+            <input type="text" id="inputJoinCodeHome" class="input-code" placeholder="Q-ABCD" maxlength="8">
+            <button class="btn btn-primary" id="btnJoinByCodeHome">Увійти</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREEN 2: SOLO SETUP -->
+    <section id="screenSoloSetup" class="view-screen">
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.5rem;">
+        <h2>🎯 Налаштування одиночного тесту</h2>
+        <button class="btn btn-secondary" id="btnSoloBackHome">← Назад</button>
+      </div>
+
+      <!-- 1. Question count -->
+      <div>
+        <label class="form-label" style="font-size: 1rem;">1. Кількість питань:</label>
+        <div class="selector-group" id="soloCountSelectors">
+          <button class="chip-btn active" data-count="10">10 питань (Швидкий)</button>
+          <button class="chip-btn" data-count="20">20 питань (Стандарт)</button>
+          <button class="chip-btn" data-count="40">40 питань (Марафон)</button>
+          <button class="chip-btn" data-count="60">Всі доступні</button>
+        </div>
+      </div>
+
+      <!-- 2. Time limit -->
+      <div>
+        <label class="form-label" style="font-size: 1rem;">2. Час на кожне питання:</label>
+        <div class="selector-group" id="soloTimerSelectors">
+          <button class="chip-btn" data-time="0">♾️ Без обмежень</button>
+          <button class="chip-btn active" data-time="15">⚡ 15 секунд</button>
+          <button class="chip-btn" data-time="30">⏱️ 30 секунд</button>
+        </div>
+      </div>
+
+      <!-- 3. Category selection -->
+      <div>
+        <label class="form-label" style="font-size: 1rem;">3. Оберіть категорію:</label>
+        <div class="categories-grid" id="soloCategoriesGrid">
+          <!-- Categories loaded via API -->
+        </div>
+      </div>
+
+      <div style="text-align: center; margin-top: 2rem;">
+        <button class="btn btn-primary btn-lg" id="btnStartSoloGame" style="min-width: 250px;">
+          🚀 Розпочати тест
+        </button>
+      </div>
+    </section>
+
+    <!-- SCREEN 3: LOBBIES BROWSER -->
+    <section id="screenLobbies" class="view-screen">
+      <div class="lobbies-header">
+        <div>
+          <h2>🌐 Доступні мультиплеєрні лобі</h2>
+          <p style="color: var(--text-muted); font-size: 0.95rem;">Приєднуйся до відкритої гри або створи власну!</p>
+        </div>
+        <div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+          <button class="btn btn-secondary" id="btnRefreshLobbies">🔄 Оновити</button>
+          <button class="btn btn-primary" id="btnOpenCreateLobbyFromList">➕ Створити лобі</button>
+          <button class="btn btn-secondary" id="btnLobbiesBackHome">← Назад</button>
+        </div>
+      </div>
+
+      <!-- Search & Filters -->
+      <div style="display: flex; gap: 1rem; margin-bottom: 1.5rem; flex-wrap: wrap;">
+        <input type="text" id="inputLobbySearch" class="form-input" placeholder="🔍 Пошук за назвою або хостом..." style="max-width: 380px;">
+      </div>
+
+      <!-- Lobbies List Container -->
+      <div class="lobbies-list-grid" id="lobbiesContainer">
+        <!-- Loaded dynamically -->
+      </div>
+    </section>
+
+    <!-- SCREEN 4: LOBBY WAITING ROOM -->
+    <section id="screenLobbyRoom" class="view-screen">
+      <div class="room-container">
+        <!-- Main Panel -->
+        <div class="room-main-panel">
+          <div class="room-header-box">
+            <div>
+              <h2 id="roomTitleText">Лобі тесту</h2>
+              <div style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.25rem;">
+                Категорія: <strong id="roomCategoryText">Загальна</strong> • Питань: <strong id="roomQuestionCountText">10</strong> • Час: <strong id="roomTimeText">15с</strong>
+              </div>
+            </div>
+
+            <!-- Code display -->
+            <div class="code-display" id="btnCopyRoomCode" title="Натисніть щоб скопіювати код">
+              <span>Код:</span>
+              <span id="roomCodeDisplay">Q-XXXX</span>
+              <span style="font-size: 1rem;">📋</span>
+            </div>
+          </div>
+
+          <!-- Players Grid -->
+          <h3 style="margin-bottom: 1rem;">Гравці в кімнаті (<span id="roomPlayerCount">1</span>/<span id="roomMaxPlayers">8</span>):</h3>
+          <div class="players-grid" id="roomPlayersList">
+            <!-- Rendered dynamically -->
+          </div>
+
+          <!-- Controls -->
+          <div style="display: flex; gap: 1rem; flex-wrap: wrap; justify-content: space-between; align-items: center; border-top: 1px solid var(--border); padding-top: 1.5rem;">
+            <button class="btn btn-danger" id="btnLeaveLobby">🚪 Вийти з лобі</button>
+            
+            <div style="display: flex; gap: 0.75rem;">
+              <button class="btn btn-secondary" id="btnToggleReady">
+                <span id="readyBtnIcon">⏳</span> <span id="readyBtnText">Готовий</span>
+              </button>
+              <button class="btn btn-primary btn-lg" id="btnHostStartGame" style="display: none;">
+                🚀 Почати гру
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Chat Panel -->
+        <div class="chat-panel">
+          <div class="chat-header">💬 Чат кімнати</div>
+          <div class="chat-messages" id="chatMessagesBox">
+            <div class="chat-msg-item" style="color: var(--text-muted); font-style: italic;">
+              Ласкаво просимо до лобі! Спілкуйтеся перед стартом гри.
+            </div>
+          </div>
+          <form class="chat-input-box" id="formRoomChat">
+            <input type="text" id="inputChatMsg" class="chat-input" placeholder="Повідомлення..." maxlength="150" autocomplete="off">
+            <button type="submit" class="btn btn-primary" style="padding: 0.5rem 0.9rem;">Надіслати</button>
+          </form>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREEN 5: GAMEPLAY -->
+    <section id="screenGame" class="view-screen">
+      <div class="game-card">
+        <!-- Top bar -->
+        <div class="game-meta-bar">
+          <span class="category-badge" id="gameCategoryBadge">Загальна ерудиція</span>
+          <span class="progress-counter">Питання <span id="gameCurrentQNum">1</span> / <span id="gameTotalQNum">10</span></span>
+          <span class="category-badge" style="background: var(--bg-card-hover); color: var(--text-main);" id="gameScoreBadge">🏆 0 очок</span>
+        </div>
+
+        <!-- Timer bar -->
+        <div class="timer-bar-container">
+          <div class="timer-bar-fill" id="gameTimerBar"></div>
+        </div>
+
+        <!-- Question text -->
+        <div class="question-text-box">
+          <p id="gameQuestionText">Завантаження запитання...</p>
+        </div>
+
+        <!-- Options -->
+        <div class="options-grid" id="gameOptionsContainer">
+          <!-- 4 option buttons -->
+        </div>
+
+        <!-- Explanation box (shown when answered) -->
+        <div class="explanation-box" id="gameExplanationBox" style="display: none;">
+          <div class="explanation-title">💡 Пояснення:</div>
+          <div id="gameExplanationText"></div>
+        </div>
+
+        <!-- Live status in multiplayer -->
+        <div class="live-answered-indicator" id="gameLiveIndicator" style="display: none;">
+          <span>👥 Статус раунду:</span>
+          <span id="gameAnsweredStatusText">Відповіло: 0 / 0</span>
+        </div>
+
+        <!-- Solo next question button -->
+        <div style="text-align: right; margin-top: 1.5rem;" id="soloNextBtnContainer" style="display: none;">
+          <button class="btn btn-primary" id="btnSoloNextQuestion" style="display: none;">
+            Наступне питання →
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- SCREEN 6: RESULTS -->
+    <section id="screenResults" class="view-screen">
+      <div class="results-card">
+        <h2 style="font-size: 2rem; margin-bottom: 0.5rem;" id="resultsTitle">🎉 Тест завершено!</h2>
+        <p style="color: var(--text-muted); margin-bottom: 2rem;" id="resultsSubtitle">Ось ваші фінальні результати:</p>
+
+        <!-- Multiplayer Podium (if multiplayer) -->
+        <div class="podium-container" id="multiplayerPodium" style="display: none;">
+          <!-- 2nd place -->
+          <div class="podium-step podium-2" id="podium2">
+            <div class="p-avatar">🥈</div>
+            <div class="p-name" id="podium2Name">-</div>
+            <div class="podium-bar">2</div>
+          </div>
+          <!-- 1st place -->
+          <div class="podium-step podium-1" id="podium1">
+            <div class="p-avatar">🥇</div>
+            <div class="p-name" id="podium1Name">-</div>
+            <div class="podium-bar">1</div>
+          </div>
+          <!-- 3rd place -->
+          <div class="podium-step podium-3" id="podium3">
+            <div class="p-avatar">🥉</div>
+            <div class="p-name" id="podium3Name">-</div>
+            <div class="podium-bar">3</div>
+          </div>
+        </div>
+
+        <!-- Solo / Personal Score Badge -->
+        <div class="score-badge-circle" id="scoreBadgeCircle">
+          <span class="num" id="resScoreValue">100%</span>
+          <span class="lbl">Точність</span>
+        </div>
+
+        <!-- Stats Overview Grid -->
+        <div class="stats-overview">
+          <div class="stat-box">
+            <div class="val" id="resTotalScore">850</div>
+            <div class="desc">Набрано балів</div>
+          </div>
+          <div class="stat-box">
+            <div class="val" id="resCorrectCount">8 / 10</div>
+            <div class="desc">Правильних відповідей</div>
+          </div>
+          <div class="stat-box">
+            <div class="val" id="resAccuracy">80%</div>
+            <div class="desc">Відсоток успіху</div>
+          </div>
+        </div>
+
+        <!-- Action buttons -->
+        <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap; margin-bottom: 2.5rem;">
+          <button class="btn btn-primary btn-lg" id="btnPlayAgain">🔄 Грати ще раз</button>
+          <button class="btn btn-secondary btn-lg" id="btnResultsBackHome">🏠 В головне меню</button>
+        </div>
+
+        <!-- Review list -->
+        <div class="review-list">
+          <h3 style="margin-bottom: 1rem;">📝 Розбір запитань та відповідей:</h3>
+          <div id="reviewItemsContainer">
+            <!-- Review items rendered here -->
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- MODAL: CREATE LOBBY -->
+  <div class="modal-overlay" id="modalCreateLobby" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">➕ Створення нового лобі</h3>
+        <button class="btn-icon" id="btnCloseCreateLobbyModal">✕</button>
+      </div>
+      <form id="formCreateLobby">
+        <div class="form-group">
+          <label class="form-label">Назва кімнати:</label>
+          <input type="text" id="inputLobbyName" class="form-input" placeholder="Наприклад: Битва Ерудитів" maxlength="40" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Категорія питань:</label>
+          <select id="selectLobbyCategory" class="form-select">
+            <!-- Options dynamically loaded -->
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Кількість питань:</label>
+          <div class="selector-group" id="lobbyCountSelectors">
+            <button type="button" class="chip-btn active" data-count="10">10 питань</button>
+            <button type="button" class="chip-btn" data-count="20">20 питань</button>
+            <button type="button" class="chip-btn" data-count="40">40 питань</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Час на запитання:</label>
+          <select id="selectLobbyTime" class="form-select">
+            <option value="10">⚡ 10 секунд</option>
+            <option value="15" selected>⏱️ 15 секунд</option>
+            <option value="20">⏱️ 20 секунд</option>
+            <option value="30">⏳ 30 секунд</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Максимум гравців:</label>
+          <select id="selectLobbyMaxPlayers" class="form-select">
+            <option value="2">2 гравці</option>
+            <option value="4">4 гравці</option>
+            <option value="8" selected>8 гравців</option>
+            <option value="16">16 гравців</option>
+          </select>
+        </div>
+
+        <div class="form-group" style="display: flex; align-items: center; gap: 0.5rem;">
+          <input type="checkbox" id="checkLobbyPrivate" style="width: 18px; height: 18px; cursor: pointer;">
+          <label for="checkLobbyPrivate" style="font-size: 0.9rem; cursor: pointer;">Приватне лобі (вхід тільки за кодом)</label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+          <button type="button" class="btn btn-secondary" id="btnCancelCreateLobby">Скасувати</button>
+          <button type="submit" class="btn btn-primary">Створити та увійти</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: PROFILE & AVATAR -->
+  <div class="modal-overlay" id="modalProfile" style="display: none;">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 class="modal-title">👤 Профіль гравця</h3>
+        <button class="btn-icon" id="btnCloseProfileModal">✕</button>
+      </div>
+      <form id="formProfile">
+        <div class="form-group">
+          <label class="form-label">Ваше ім'я / нікнейм:</label>
+          <input type="text" id="inputProfileName" class="form-input" placeholder="Введіть нікнейм" maxlength="18" required>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Оберіть аватар:</label>
+          <div class="avatar-grid" id="avatarGrid">
+            <span class="avatar-option selected" data-avatar="🦊">🦊</span>
+            <span class="avatar-option" data-avatar="🐼">🐼</span>
+            <span class="avatar-option" data-avatar="🦁">🦁</span>
+            <span class="avatar-option" data-avatar="🐯">🐯</span>
+            <span class="avatar-option" data-avatar="🦄">🦄</span>
+            <span class="avatar-option" data-avatar="🦉">🦉</span>
+            <span class="avatar-option" data-avatar="🚀">🚀</span>
+            <span class="avatar-option" data-avatar="⚡">⚡</span>
+            <span class="avatar-option" data-avatar="👑">👑</span>
+            <span class="avatar-option" data-avatar="🎮">🎮</span>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 0.75rem; margin-top: 1.5rem;">
+          <button type="submit" class="btn btn-primary">Зберегти</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- COUNTDOWN OVERLAY -->
+  <div class="countdown-overlay" id="countdownOverlay" style="display: none;">
+    <div style="font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem;">Гра починається через:</div>
+    <div class="countdown-num" id="countdownNum">3</div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <!-- Scripts -->
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <script src="questions.js"></script>
+  <script src="audio.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
