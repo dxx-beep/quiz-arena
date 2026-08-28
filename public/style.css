@@ -661,17 +661,41 @@ body {
 .question-text-box {
   font-size: 1.3rem;
   font-weight: 700;
-  line-height: 1.4;
+  line-height: 1.45;
   margin-bottom: 1.75rem;
-  min-height: 60px;
+  min-height: 65px;
   display: flex;
   align-items: center;
+  user-select: none;
+  -webkit-user-select: none;
+  position: relative;
+}
+
+.typewriter-cursor {
+  display: inline-block;
+  width: 3px;
+  height: 1.2em;
+  background-color: var(--primary);
+  margin-left: 4px;
+  vertical-align: middle;
+  animation: blinkCursor 0.6s infinite alternate;
+}
+
+@keyframes blinkCursor {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 .options-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.9rem;
+  transition: opacity 0.25s ease;
+}
+
+.options-grid.locked-typing {
+  opacity: 0.65;
+  pointer-events: none;
 }
 
 .option-btn {

@@ -453,8 +453,44 @@ document.addEventListener('DOMContentLoaded', () => {
       optContainer.appendChild(btn);
     });
 
+    let typewriterTimeout = null;
+
+    function typewriteQuestionText(fullText, onComplete) {
+      if (typewriterTimeout) clearTimeout(typewriterTimeout);
+      const container = document.getElementById('gameQuestionText');
+      const optContainer = document.getElementById('gameOptionsContainer');
+      
+      container.innerHTML = '<span class="typewriter-content"></span><span class="typewriter-cursor"></span>';
+      const contentSpan = container.querySelector('.typewriter-content');
+      const cursorSpan = container.querySelector('.typewriter-cursor');
+      
+      optContainer.classList.add('locked-typing');
+
+      let charIdx = 0;
+      const speed = 25; // ms per char: fast, crisp reading stream
+
+      function typeNext() {
+        if (charIdx < fullText.length) {
+          contentSpan.textContent += fullText[charIdx];
+          charIdx++;
+          typewriterTimeout = setTimeout(typeNext, speed);
+        } else {
+          if (cursorSpan) cursorSpan.remove();
+          optContainer.classList.remove('locked-typing');
+          if (onComplete) onComplete();
+        }
+      }
+
+      typeNext();
+    }
+
+    // Start timer & options activation once text finishes streaming (or simultaneously)
     if (state.solo.timerInterval) clearInterval(state.solo.timerInterval);
     const timerBar = document.getElementById('gameTimerBar');
+
+    typewriteQuestionText(q.question, () => {
+      // Options unlocked!
+    });
 
     if (state.solo.timeLimit > 0) {
       state.solo.timeRemaining = state.solo.timeLimit;
@@ -1167,8 +1203,43 @@ document.addEventListener('DOMContentLoaded', () => {
       optContainer.appendChild(btn);
     });
 
+    let multiTypewriterTimeout = null;
+
+    function typewriteMultiQuestionText(fullText, onComplete) {
+      if (multiTypewriterTimeout) clearTimeout(multiTypewriterTimeout);
+      const container = document.getElementById('gameQuestionText');
+      const optContainer = document.getElementById('gameOptionsContainer');
+      
+      container.innerHTML = '<span class="typewriter-content"></span><span class="typewriter-cursor"></span>';
+      const contentSpan = container.querySelector('.typewriter-content');
+      const cursorSpan = container.querySelector('.typewriter-cursor');
+      
+      optContainer.classList.add('locked-typing');
+
+      let charIdx = 0;
+      const speed = 25; // ms per char: quick dynamic reading stream
+
+      function typeNext() {
+        if (charIdx < fullText.length) {
+          contentSpan.textContent += fullText[charIdx];
+          charIdx++;
+          multiTypewriterTimeout = setTimeout(typeNext, speed);
+        } else {
+          if (cursorSpan) cursorSpan.remove();
+          optContainer.classList.remove('locked-typing');
+          if (onComplete) onComplete();
+        }
+      }
+
+      typeNext();
+    }
+
     if (state.multi.timerInterval) clearInterval(state.multi.timerInterval);
     const timerBar = document.getElementById('gameTimerBar');
+
+    typewriteMultiQuestionText(q.question, () => {
+      // Options unlocked!
+    });
 
     const timeLimit = state.multi.room?.timePerQuestion || 15;
     state.multi.timeRemaining = timeLimit;
@@ -1718,6 +1789,13 @@ document.addEventListener('DOMContentLoaded', () => {
       joinLobbyByCode(joinParam);
     }, 600);
   }
+
+  // Anti-cheat: prevent right-click context menu & drag selection during gameplay
+  document.addEventListener('contextmenu', (e) => {
+    if (state.currentView === 'screenGame') {
+      e.preventDefault();
+    }
+  });
 
   // Init
   initUser();
