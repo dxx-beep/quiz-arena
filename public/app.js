@@ -1,4 +1,4 @@
-// QuizArena - 100% Real Multiplayer with Easy/Medium/Hard Difficulty Levels
+// QuizArena - 100% Reliable Multiplayer via Fast Global WebSockets (MQTT)
 document.addEventListener('DOMContentLoaded', () => {
   // App State
   const state = {
@@ -25,13 +25,11 @@ document.addEventListener('DOMContentLoaded', () => {
       timeRemaining: 15
     },
 
-    // Real Multiplayer State (P2P via PeerJS + Global MQTT Broker)
+    // Multiplayer State (Rock-solid WebSockets over MQTT)
     multi: {
-      peer: null,
-      peerId: null,
       isHost: false,
-      hostConn: null,
-      guestConns: new Map(),
+      currentRoomCode: null,
+      roomTopic: null,
       room: null,
       myQuestions: [],
       currentIndex: 0,
@@ -41,10 +39,12 @@ document.addEventListener('DOMContentLoaded', () => {
       userAnswers: [],
       timeRemaining: 15,
       timerInterval: null,
-      hasAnsweredCurrent: false,
       isFinished: false,
       publicLobbies: new Map(),
-      announceInterval: null
+      announceInterval: null,
+      playerHeartbeatInterval: null,
+      lastHostSeen: 0,
+      joinTimeout: null
     }
   };
 
@@ -72,45 +72,106 @@ document.addEventListener('DOMContentLoaded', () => {
   const toastContainer = document.getElementById('toastContainer');
 
   // -------------------------------------------------------------
-  // GLOBAL REAL-TIME PUBLIC LOBBY REGISTRY VIA MQTT & BROADCASTCHANNEL
+  // GLOBAL WEBSOCKET MQTT BROKER (100% Guaranteed Connection)
   // -------------------------------------------------------------
   let mqttClient = null;
-  const MQTT_TOPIC = 'quizarena/ua/lobbies/presence';
+  const PRESENCE_TOPIC = 'quizarena/ua/lobbies/presence_v2';
+  const ROOM_TOPIC_PREFIX = 'quizarena/ua/rooms_v2/';
 
-  function initGlobalLobbyBroker() {
-    try {
-      if (typeof mqtt !== 'undefined') {
-        mqttClient = mqtt.connect('wss://broker.emqx.io:8084/mqtt', {
-          clientId: 'qa_' + state.user.id,
+  const localBroadcast = window.BroadcastChannel ? new BroadcastChannel('quiz_arena_local_broadcast') : null;
+  if (localBroadcast) {
+    localBroadcast.onmessage = (e) => {
+      const msg = e.data;
+      if (msg.channel === 'presence') {
+        handlePresenceMessage(msg.data);
+      } else if (msg.channel === 'room' && state.multi.currentRoomCode === msg.roomCode) {
+        handleRoomMessage(msg.data);
+      }
+    };
+  }
+
+  function initMqtt() {
+    const brokerUrls = [
+      'wss://broker.emqx.io:8084/mqtt',
+      'wss://broker.hivemq.com:8884/mqtt'
+    ];
+    let brokerIdx = 0;
+
+    function connectBroker() {
+      try {
+        if (typeof mqtt === 'undefined') {
+          console.warn('MQTT script not loaded yet, retrying in 500ms...');
+          setTimeout(connectBroker, 500);
+          return;
+        }
+
+        mqttClient = mqtt.connect(brokerUrls[brokerIdx], {
+          clientId: 'qa_' + state.user.id + '_' + Math.random().toString(36).substr(2, 5),
           clean: true,
-          connectTimeout: 5000,
-          reconnectPeriod: 5000
+          connectTimeout: 8000,
+          reconnectPeriod: 4000
         });
 
         mqttClient.on('connect', () => {
-          mqttClient.subscribe(MQTT_TOPIC);
+          console.log('⚡ Connected to Real-time WebSockets Broker:', brokerUrls[brokerIdx]);
+          mqttClient.subscribe(PRESENCE_TOPIC);
+          if (state.multi.roomTopic) {
+            mqttClient.subscribe(state.multi.roomTopic);
+          }
         });
 
         mqttClient.on('message', (topic, payload) => {
           try {
             const data = JSON.parse(payload.toString());
-            handleGlobalLobbyMessage(data);
-          } catch (e) {}
+            if (topic === PRESENCE_TOPIC) {
+              handlePresenceMessage(data);
+            } else if (topic.startsWith(ROOM_TOPIC_PREFIX)) {
+              handleRoomMessage(data);
+            }
+          } catch (e) {
+            console.error('MQTT parse error:', e);
+          }
         });
+
+        mqttClient.on('error', (err) => {
+          console.warn('MQTT Error on', brokerUrls[brokerIdx], err);
+          brokerIdx = (brokerIdx + 1) % brokerUrls.length;
+        });
+      } catch (e) {
+        console.error('MQTT Connect exception:', e);
       }
-    } catch (e) {}
+    }
+
+    connectBroker();
   }
 
-  const localBroadcast = window.BroadcastChannel ? new BroadcastChannel('quiz_arena_local_channel') : null;
-  if (localBroadcast) {
-    localBroadcast.onmessage = (e) => {
-      handleGlobalLobbyMessage(e.data);
-    };
+  function publishRoomMessage(data) {
+    if (!state.multi.currentRoomCode) return;
+    const topic = ROOM_TOPIC_PREFIX + state.multi.currentRoomCode;
+    const payload = JSON.stringify(data);
+
+    if (mqttClient && mqttClient.connected) {
+      mqttClient.publish(topic, payload);
+    }
+    if (localBroadcast) {
+      localBroadcast.postMessage({ channel: 'room', roomCode: state.multi.currentRoomCode, data });
+    }
   }
 
-  function handleGlobalLobbyMessage(data) {
+  function publishPresenceMessage(data) {
+    const payload = JSON.stringify(data);
+    if (mqttClient && mqttClient.connected) {
+      mqttClient.publish(PRESENCE_TOPIC, payload);
+    }
+    if (localBroadcast) {
+      localBroadcast.postMessage({ channel: 'presence', data });
+    }
+  }
+
+  // Handle Global Public Lobbies Presence
+  function handlePresenceMessage(data) {
     const now = Date.now();
-    if (data.type === 'LOBBY_HEARTBEAT') {
+    if (data.type === 'LOBBY_PING') {
       state.multi.publicLobbies.set(data.lobby.code, {
         ...data.lobby,
         lastSeen: now
@@ -126,11 +187,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  // Cleanup old public lobbies (> 10s without ping)
   setInterval(() => {
     const now = Date.now();
     let changed = false;
     state.multi.publicLobbies.forEach((lobby, code) => {
-      if (now - lobby.lastSeen > 12000) {
+      if (now - lobby.lastSeen > 10000) {
         state.multi.publicLobbies.delete(code);
         changed = true;
       }
@@ -138,53 +200,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (changed && state.currentView === 'screenLobbies') {
       renderLobbiesList();
     }
-  }, 4000);
-
-  function startLobbyHeartbeat() {
-    stopLobbyHeartbeat();
-    sendHeartbeat();
-    state.multi.announceInterval = setInterval(sendHeartbeat, 3500);
-  }
-
-  function stopLobbyHeartbeat() {
-    if (state.multi.announceInterval) {
-      clearInterval(state.multi.announceInterval);
-      state.multi.announceInterval = null;
-    }
-    if (state.multi.room) {
-      const payload = JSON.stringify({ type: 'LOBBY_CLOSED', code: state.multi.room.code });
-      if (mqttClient && mqttClient.connected) mqttClient.publish(MQTT_TOPIC, payload);
-      if (localBroadcast) localBroadcast.postMessage({ type: 'LOBBY_CLOSED', code: state.multi.room.code });
-    }
-  }
-
-  function sendHeartbeat() {
-    const room = state.multi.room;
-    if (!room || !state.multi.isHost || room.isPrivate) return;
-
-    const lobbyData = {
-      code: room.code,
-      name: room.name,
-      hostName: room.hostName,
-      playerCount: Object.keys(room.players).length,
-      maxPlayers: room.maxPlayers,
-      questionCount: room.questionCount,
-      timePerQuestion: room.timePerQuestion,
-      difficulty: room.difficulty || 'all',
-      status: room.status
-    };
-
-    const payload = JSON.stringify({
-      type: 'LOBBY_HEARTBEAT',
-      lobby: lobbyData
-    });
-
-    if (mqttClient && mqttClient.connected) mqttClient.publish(MQTT_TOPIC, payload);
-    if (localBroadcast) localBroadcast.postMessage({ type: 'LOBBY_HEARTBEAT', lobby: lobbyData });
-  }
+  }, 3000);
 
   // -------------------------------------------------------------
-  // THEME & USER PROFILE
+  // USER PROFILE & THEME & AUDIO
   // -------------------------------------------------------------
   function initUser() {
     document.documentElement.setAttribute('data-theme', state.user.theme);
@@ -211,7 +230,7 @@ document.addEventListener('DOMContentLoaded', () => {
   btnLogoHome.addEventListener('click', () => {
     window.soundController.playClick();
     if (state.multi.room) {
-      if (confirm('Ви дійсно хочете вийти з кімнати?')) {
+      if (confirm('Ви дійсно хочете вийти з поточної кімнати?')) {
         leaveCurrentLobby();
         showScreen('screenHome');
       }
@@ -256,18 +275,12 @@ document.addEventListener('DOMContentLoaded', () => {
       window.soundController.playClick();
 
       if (state.multi.room) {
-        if (state.multi.isHost) {
-          state.multi.room.players[state.user.id].name = newName;
-          state.multi.room.players[state.user.id].avatar = selectedAvatar;
-          broadcastToRoom({ type: 'ROOM_UPDATED', room: state.multi.room });
-          renderWaitingRoom();
-        } else if (state.multi.hostConn) {
-          state.multi.hostConn.send({
-            type: 'UPDATE_PROFILE',
-            name: newName,
-            avatar: selectedAvatar
-          });
-        }
+        publishRoomMessage({
+          type: 'UPDATE_PROFILE',
+          playerId: state.user.id,
+          name: newName,
+          avatar: selectedAvatar
+        });
       }
     }
   });
@@ -385,7 +398,6 @@ document.addEventListener('DOMContentLoaded', () => {
     window.soundController.playClick();
     const pool = window.QUIZ_QUESTIONS || [];
     
-    // Filter questions by difficulty
     let filtered = pool;
     if (state.solo.difficulty !== 'all') {
       filtered = pool.filter(q => q.difficulty === state.solo.difficulty);
@@ -630,7 +642,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // -------------------------------------------------------------
-  // MULTIPLAYER LOBBY WITH DIFFICULTY TIERS & KICK SUPPORT
+  // MULTIPLAYER LOBBY PROTOCOL (ROCK-SOLID WEBSOCKETS OVER MQTT)
   // -------------------------------------------------------------
   const btnOpenCreateLobbyModal = document.getElementById('btnOpenCreateLobbyModal');
   const btnOpenCreateLobbyFromList = document.getElementById('btnOpenCreateLobbyFromList');
@@ -688,324 +700,301 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  // Host: Create Room
   function hostCreateRoom(opts) {
     leaveCurrentLobby();
     showToast('Створення кімнати...', 'info');
 
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const roomCode = `Q-${randomSuffix}`;
-    const peerRoomId = `quizarena-${roomCode.toLowerCase()}`;
 
-    const peer = new Peer(peerRoomId, { debug: 1 });
-    state.multi.peer = peer;
     state.multi.isHost = true;
+    state.multi.currentRoomCode = roomCode;
+    state.multi.roomTopic = ROOM_TOPIC_PREFIX + roomCode;
 
-    peer.on('open', (id) => {
-      state.multi.peerId = id;
+    if (mqttClient && mqttClient.connected) {
+      mqttClient.subscribe(state.multi.roomTopic);
+    }
 
-      const room = {
-        code: roomCode,
-        peerId: id,
-        name: opts.name || `Лобі гравця ${state.user.name}`,
-        hostId: state.user.id,
-        hostName: state.user.name,
-        questionCount: opts.questionCount || 10,
-        difficulty: opts.difficulty || 'all',
-        timePerQuestion: opts.timePerQuestion || 15,
-        maxPlayers: opts.maxPlayers || 8,
-        isPrivate: opts.isPrivate,
-        status: 'waiting',
-        players: {
-          [state.user.id]: {
-            id: state.user.id,
-            peerId: id,
-            name: state.user.name,
-            avatar: state.user.avatar,
-            isHost: true,
-            isReady: true,
-            score: 0,
-            streak: 0,
-            correctCount: 0,
-            progress: 0,
-            finished: false
+    const room = {
+      code: roomCode,
+      name: opts.name || `Лобі гравця ${state.user.name}`,
+      hostId: state.user.id,
+      hostName: state.user.name,
+      questionCount: opts.questionCount || 10,
+      difficulty: opts.difficulty || 'all',
+      timePerQuestion: opts.timePerQuestion || 15,
+      maxPlayers: opts.maxPlayers || 8,
+      isPrivate: opts.isPrivate,
+      status: 'waiting',
+      players: {
+        [state.user.id]: {
+          id: state.user.id,
+          name: state.user.name,
+          avatar: state.user.avatar,
+          isHost: true,
+          isReady: true,
+          score: 0,
+          streak: 0,
+          correctCount: 0,
+          progress: 0,
+          finished: false,
+          lastSeen: Date.now()
+        }
+      }
+    };
+
+    state.multi.room = room;
+    renderWaitingRoom();
+    showScreen('screenLobbyRoom');
+    showToast(`Лобі ${roomCode} створено! Скопіюйте код для друзів`, 'success');
+
+    // Start lobby presence announcements
+    startLobbyPresenceHeartbeat();
+    startPlayerHeartbeat();
+  }
+
+  function startLobbyPresenceHeartbeat() {
+    stopLobbyPresenceHeartbeat();
+    sendLobbyPresence();
+    state.multi.announceInterval = setInterval(sendLobbyPresence, 2500);
+  }
+
+  function stopLobbyPresenceHeartbeat() {
+    if (state.multi.announceInterval) {
+      clearInterval(state.multi.announceInterval);
+      state.multi.announceInterval = null;
+    }
+  }
+
+  function sendLobbyPresence() {
+    const room = state.multi.room;
+    if (!room || !state.multi.isHost || room.isPrivate) return;
+
+    publishPresenceMessage({
+      type: 'LOBBY_PING',
+      lobby: {
+        code: room.code,
+        name: room.name,
+        hostName: room.hostName,
+        playerCount: Object.keys(room.players).length,
+        maxPlayers: room.maxPlayers,
+        questionCount: room.questionCount,
+        difficulty: room.difficulty || 'all',
+        timePerQuestion: room.timePerQuestion,
+        status: room.status
+      }
+    });
+  }
+
+  function startPlayerHeartbeat() {
+    if (state.multi.playerHeartbeatInterval) clearInterval(state.multi.playerHeartbeatInterval);
+    state.multi.playerHeartbeatInterval = setInterval(() => {
+      if (state.multi.currentRoomCode && state.multi.room) {
+        publishRoomMessage({
+          type: 'PLAYER_PING',
+          playerId: state.user.id,
+          isHost: state.multi.isHost
+        });
+
+        // Host checks guest timeouts (> 12s)
+        if (state.multi.isHost) {
+          const now = Date.now();
+          let playerRemoved = false;
+          Object.values(state.multi.room.players).forEach(p => {
+            if (!p.isHost && p.lastSeen && (now - p.lastSeen > 12000)) {
+              delete state.multi.room.players[p.id];
+              playerRemoved = true;
+              showToast(`Гравець ${p.name} від'єднався через неактивність`, 'info');
+              publishRoomMessage({
+                type: 'CHAT_MSG',
+                sender: 'Система',
+                avatar: '🚪',
+                text: `Гравець ${p.name} від'єднався`,
+                time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+              });
+            }
+          });
+
+          if (playerRemoved) {
+            publishRoomMessage({ type: 'ROOM_UPDATED', room: state.multi.room });
+            renderWaitingRoom();
+            sendLobbyPresence();
+            if (state.multi.room.status === 'playing') {
+              const allDone = Object.values(state.multi.room.players).every(p => p.finished);
+              if (allDone) hostFinishGame();
+            }
           }
         }
-      };
-
-      state.multi.room = room;
-      renderWaitingRoom();
-      showScreen('screenLobbyRoom');
-      showToast(`Лобі ${roomCode} відкрито! Запросіть друзів`, 'success');
-      startLobbyHeartbeat();
-    });
-
-    peer.on('connection', (conn) => {
-      conn.on('open', () => {
-        console.log('👋 Підключився реальний гравець:', conn.peer);
-      });
-
-      conn.on('data', (data) => {
-        handleHostReceivedData(conn, data);
-      });
-
-      conn.on('close', () => {
-        removeGuestByConn(conn);
-      });
-
-      conn.on('error', (err) => {
-        console.error('Conn error:', err);
-      });
-    });
-
-    peer.on('error', (err) => {
-      if (err.type === 'unavailable-id') {
-        hostCreateRoom(opts);
-      } else {
-        showToast('Помилка P2P: ' + err.message, 'error');
       }
-    });
+    }, 3000);
   }
 
-  function handleHostReceivedData(conn, data) {
-    const room = state.multi.room;
-    if (!room) return;
-
-    if (data.type === 'JOIN_REQUEST') {
-      if (room.status !== 'waiting') {
-        conn.send({ type: 'JOIN_ERROR', message: 'Гра в цьому лобі вже розпочалася!' });
-        return;
-      }
-      if (Object.keys(room.players).length >= room.maxPlayers) {
-        conn.send({ type: 'JOIN_ERROR', message: 'Лобі заповнене!' });
-        return;
-      }
-
-      const guestPlayer = {
-        id: data.player.id,
-        peerId: conn.peer,
-        name: data.player.name,
-        avatar: data.player.avatar,
-        isHost: false,
-        isReady: false,
-        score: 0,
-        streak: 0,
-        correctCount: 0,
-        progress: 0,
-        finished: false
-      };
-
-      state.multi.guestConns.set(conn.peer, conn);
-      room.players[guestPlayer.id] = guestPlayer;
-
-      conn.send({
-        type: 'JOIN_SUCCESS',
-        room: room,
-        yourId: guestPlayer.id
-      });
-
-      broadcastToRoom({
-        type: 'ROOM_UPDATED',
-        room: room
-      });
-
-      broadcastToRoom({
-        type: 'CHAT_MSG',
-        sender: 'Система',
-        avatar: '👋',
-        text: `Гравець ${guestPlayer.name} приєднався до кімнати!`,
-        time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
-      });
-
-      renderWaitingRoom();
-      sendHeartbeat();
-    }
-
-    if (data.type === 'TOGGLE_READY') {
-      const p = room.players[data.playerId];
-      if (p) {
-        p.isReady = !p.isReady;
-        broadcastToRoom({ type: 'ROOM_UPDATED', room: room });
-        renderWaitingRoom();
-      }
-    }
-
-    if (data.type === 'UPDATE_PROFILE') {
-      const p = Object.values(room.players).find(pl => pl.peerId === conn.peer);
-      if (p) {
-        p.name = data.name;
-        p.avatar = data.avatar;
-        broadcastToRoom({ type: 'ROOM_UPDATED', room: room });
-        renderWaitingRoom();
-      }
-    }
-
-    if (data.type === 'CHAT_MSG') {
-      broadcastToRoom({
-        type: 'CHAT_MSG',
-        sender: data.sender,
-        avatar: data.avatar,
-        text: data.text,
-        time: data.time
-      });
-    }
-
-    if (data.type === 'PLAYER_PROGRESS_UPDATE') {
-      const player = room.players[data.playerId];
-      if (player) {
-        player.score = data.score;
-        player.streak = data.streak;
-        player.correctCount = data.correctCount;
-        player.progress = data.progress;
-        player.finished = data.finished;
-      }
-
-      broadcastToRoom({
-        type: 'RACE_BOARD_UPDATE',
-        players: Object.values(room.players)
-      });
-
-      const allFinished = Object.values(room.players).every(p => p.finished);
-      if (allFinished) {
-        hostFinishGame();
-      }
-    }
-  }
-
-  function removeGuestByConn(conn) {
-    const room = state.multi.room;
-    if (!room) return;
-
-    state.multi.guestConns.delete(conn.peer);
-    let removedPlayer = null;
-
-    Object.keys(room.players).forEach(pid => {
-      if (room.players[pid].peerId === conn.peer) {
-        removedPlayer = room.players[pid];
-        delete room.players[pid];
-      }
-    });
-
-    if (removedPlayer) {
-      showToast(`Гравець ${removedPlayer.name} покинув кімнату`, 'info');
-      broadcastToRoom({ type: 'ROOM_UPDATED', room: room });
-      broadcastToRoom({
-        type: 'CHAT_MSG',
-        sender: 'Система',
-        avatar: '🚪',
-        text: `Гравець ${removedPlayer.name} вийшов з лобі`,
-        time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
-      });
-      renderWaitingRoom();
-      sendHeartbeat();
-
-      if (room.status === 'playing') {
-        const allFinished = Object.values(room.players).every(p => p.finished);
-        if (allFinished) hostFinishGame();
-      }
-    }
-  }
-
-  function hostKickPlayer(playerId, peerId, playerName) {
-    const room = state.multi.room;
-    if (!room || !state.multi.isHost) return;
-
-    const conn = state.multi.guestConns.get(peerId);
-    if (conn && conn.open) {
-      try {
-        conn.send({ type: 'KICKED', message: 'Хост виключив вас із кімнати' });
-        setTimeout(() => conn.close(), 100);
-      } catch (e) {}
-    }
-
-    state.multi.guestConns.delete(peerId);
-    delete room.players[playerId];
-
-    showToast(`Гравця ${playerName || ''} кікнуто`, 'info');
-    broadcastToRoom({ type: 'ROOM_UPDATED', room: room });
-    broadcastToRoom({
-      type: 'CHAT_MSG',
-      sender: 'Система',
-      avatar: '🚫',
-      text: `Гравця ${playerName || 'учасника'} було виключено хостом`,
-      time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
-    });
-    renderWaitingRoom();
-    sendHeartbeat();
-  }
-
-  function broadcastToRoom(msg) {
-    state.multi.guestConns.forEach(conn => {
-      if (conn.open) {
-        conn.send(msg);
-      }
-    });
-    handleClientReceivedData(msg);
-  }
-
+  // Guest: Join Lobby by Code
   function joinLobbyByCode(code) {
     leaveCurrentLobby();
     const cleanCode = code.trim().toUpperCase();
-    const peerHostId = `quizarena-${cleanCode.toLowerCase()}`;
-
     showToast(`Підключення до ${cleanCode}...`, 'info');
 
-    const peer = new Peer(undefined, { debug: 1 });
-    state.multi.peer = peer;
     state.multi.isHost = false;
+    state.multi.currentRoomCode = cleanCode;
+    state.multi.roomTopic = ROOM_TOPIC_PREFIX + cleanCode;
 
-    peer.on('open', (myPeerId) => {
-      state.multi.peerId = myPeerId;
+    if (mqttClient && mqttClient.connected) {
+      mqttClient.subscribe(state.multi.roomTopic);
+    }
 
-      const conn = peer.connect(peerHostId, { reliable: true });
-      state.multi.hostConn = conn;
-
-      conn.on('open', () => {
-        conn.send({
-          type: 'JOIN_REQUEST',
-          player: {
-            id: state.user.id,
-            name: state.user.name,
-            avatar: state.user.avatar
-          }
-        });
+    // Send Join Request with retries
+    let attempts = 0;
+    const sendJoin = () => {
+      if (state.multi.room) return; // Already joined!
+      attempts++;
+      publishRoomMessage({
+        type: 'JOIN_REQUEST',
+        targetRoomCode: cleanCode,
+        fromId: state.user.id,
+        player: {
+          id: state.user.id,
+          name: state.user.name,
+          avatar: state.user.avatar
+        }
       });
 
-      conn.on('data', (data) => {
-        handleClientReceivedData(data);
-      });
-
-      conn.on('close', () => {
-        showToast('З\'єднання з хостом закрито', 'error');
+      if (attempts < 5 && !state.multi.room) {
+        state.multi.joinTimeout = setTimeout(sendJoin, 1000);
+      } else if (attempts >= 5 && !state.multi.room) {
+        showToast('Не вдалося знайти кімнату або хост не відповідає!', 'error');
         leaveCurrentLobby();
         showScreen('screenLobbies');
-      });
+      }
+    };
 
-      conn.on('error', (err) => {
-        showToast('Помилка з\'єднання: ' + err.message, 'error');
-      });
-    });
-
-    peer.on('error', (err) => {
-      showToast('Не знайдено відкритого лобі з таким кодом!', 'error');
-    });
+    setTimeout(sendJoin, 300);
   }
 
-  function handleClientReceivedData(data) {
-    if (data.type === 'JOIN_SUCCESS') {
+  // -------------------------------------------------------------
+  // CENTRAL ROOM MESSAGE DISPATCHER
+  // -------------------------------------------------------------
+  function handleRoomMessage(data) {
+    const room = state.multi.room;
+
+    // HOST HANDLERS
+    if (state.multi.isHost && room) {
+      if (data.type === 'JOIN_REQUEST') {
+        if (room.status !== 'waiting') {
+          publishRoomMessage({
+            type: 'JOIN_ERROR',
+            targetId: data.fromId,
+            message: 'Гра в цьому лобі вже розпочалася!'
+          });
+          return;
+        }
+
+        if (Object.keys(room.players).length >= room.maxPlayers) {
+          publishRoomMessage({
+            type: 'JOIN_ERROR',
+            targetId: data.fromId,
+            message: 'Лобі вже заповнене!'
+          });
+          return;
+        }
+
+        const newPlayer = {
+          id: data.player.id,
+          name: data.player.name,
+          avatar: data.player.avatar,
+          isHost: false,
+          isReady: false,
+          score: 0,
+          streak: 0,
+          correctCount: 0,
+          progress: 0,
+          finished: false,
+          lastSeen: Date.now()
+        };
+
+        room.players[newPlayer.id] = newPlayer;
+
+        publishRoomMessage({
+          type: 'JOIN_SUCCESS',
+          targetId: newPlayer.id,
+          room: room
+        });
+
+        publishRoomMessage({
+          type: 'ROOM_UPDATED',
+          room: room
+        });
+
+        publishRoomMessage({
+          type: 'CHAT_MSG',
+          sender: 'Система',
+          avatar: '👋',
+          text: `Гравець ${newPlayer.name} приєднався до кімнати!`,
+          time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+        });
+
+        renderWaitingRoom();
+        sendLobbyPresence();
+      }
+
+      if (data.type === 'TOGGLE_READY') {
+        const p = room.players[data.playerId];
+        if (p) {
+          p.isReady = !p.isReady;
+          publishRoomMessage({ type: 'ROOM_UPDATED', room: room });
+          renderWaitingRoom();
+        }
+      }
+
+      if (data.type === 'PLAYER_PROGRESS_UPDATE') {
+        const p = room.players[data.playerId];
+        if (p) {
+          p.score = data.score;
+          p.streak = data.streak;
+          p.correctCount = data.correctCount;
+          p.progress = data.progress;
+          p.finished = data.finished;
+          p.lastSeen = Date.now();
+        }
+
+        publishRoomMessage({
+          type: 'RACE_BOARD_UPDATE',
+          players: Object.values(room.players)
+        });
+
+        const allFinished = Object.values(room.players).every(pl => pl.finished);
+        if (allFinished) {
+          hostFinishGame();
+        }
+      }
+    }
+
+    // ALL CLIENTS HANDLERS (Host + Guests)
+    if (data.type === 'PLAYER_PING') {
+      if (room && room.players[data.playerId]) {
+        room.players[data.playerId].lastSeen = Date.now();
+      }
+    }
+
+    if (data.type === 'JOIN_SUCCESS' && data.targetId === state.user.id) {
+      if (state.multi.joinTimeout) clearTimeout(state.multi.joinTimeout);
       state.multi.room = data.room;
       state.multi.isHost = false;
       renderWaitingRoom();
       showScreen('screenLobbyRoom');
       showToast('Ви успішно увійшли в лобі!', 'success');
+      startPlayerHeartbeat();
     }
 
-    if (data.type === 'JOIN_ERROR') {
-      showToast(data.message || 'Не вдалося увійти в кімнату', 'error');
+    if (data.type === 'JOIN_ERROR' && data.targetId === state.user.id) {
+      if (state.multi.joinTimeout) clearTimeout(state.multi.joinTimeout);
+      showToast(data.message || 'Помилка входу в кімнату', 'error');
       leaveCurrentLobby();
       showScreen('screenLobbies');
     }
 
-    if (data.type === 'KICKED') {
+    if (data.type === 'KICKED' && data.targetId === state.user.id) {
       showToast(data.message || 'Вас було виключено з кімнати хостом', 'error');
       leaveCurrentLobby();
       showScreen('screenLobbies');
@@ -1015,6 +1004,14 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.type === 'ROOM_UPDATED') {
       state.multi.room = data.room;
       renderWaitingRoom();
+    }
+
+    if (data.type === 'UPDATE_PROFILE') {
+      if (room && room.players[data.playerId]) {
+        room.players[data.playerId].name = data.name;
+        room.players[data.playerId].avatar = data.avatar;
+        renderWaitingRoom();
+      }
     }
 
     if (data.type === 'CHAT_MSG') {
@@ -1031,7 +1028,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    if (data.type === 'GAME_STARTED_PERSONAL') {
+    if (data.type === 'GAME_STARTED_FOR_PLAYER' && data.targetId === state.user.id) {
       countdownOverlay.style.display = 'none';
       showScreen('screenGame');
       document.getElementById('gameLiveRaceBoard').style.display = 'block';
@@ -1131,7 +1128,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // -------------------------------------------------------------
-  // INDIVIDUAL MULTIPLAYER GAMEPLAY WITH DIFFICULTY MULTIPLIERS
+  // INDIVIDUAL MULTIPLAYER GAMEPLAY
   // -------------------------------------------------------------
   function startMultiplayerIndividualQuestion() {
     const q = state.multi.myQuestions[state.multi.currentIndex];
@@ -1286,7 +1283,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentProg = state.multi.currentIndex + 1;
     const isFinished = currentProg >= total;
 
-    const payload = {
+    publishRoomMessage({
       type: 'PLAYER_PROGRESS_UPDATE',
       playerId: state.user.id,
       score: state.multi.score,
@@ -1294,13 +1291,7 @@ document.addEventListener('DOMContentLoaded', () => {
       correctCount: state.multi.correctCount,
       progress: Math.min(currentProg, total),
       finished: isFinished
-    };
-
-    if (state.multi.isHost) {
-      handleHostReceivedData(null, payload);
-    } else if (state.multi.hostConn) {
-      state.multi.hostConn.send(payload);
-    }
+    });
   }
 
   function finishMyMultiplayerQuiz() {
@@ -1352,9 +1343,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // -------------------------------------------------------------
-  // HOST: START GAME WITH UNIQUE QUESTIONS ACCORDING TO DIFFICULTY
-  // -------------------------------------------------------------
+  // Host: Start Game
   document.getElementById('btnHostStartGame').addEventListener('click', () => {
     window.soundController.playClick();
     const room = state.multi.room;
@@ -1371,33 +1360,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     room.status = 'playing';
 
-    const hostQuestions = shuffle(filtered).slice(0, Math.min(qCount, filtered.length));
-
-    state.multi.guestConns.forEach((conn, guestPeerId) => {
-      const guestQuestions = shuffle(filtered).slice(0, Math.min(qCount, filtered.length));
-      conn.send({
-        type: 'GAME_STARTED_PERSONAL',
-        questions: guestQuestions
+    // Broadcast individual questions to each player
+    Object.keys(room.players).forEach(playerId => {
+      const playerQuestions = shuffle(filtered).slice(0, Math.min(qCount, filtered.length));
+      publishRoomMessage({
+        type: 'GAME_STARTED_FOR_PLAYER',
+        targetId: playerId,
+        questions: playerQuestions
       });
     });
 
     let countdown = 3;
-    broadcastToRoom({ type: 'START_COUNTDOWN', count: countdown });
+    publishRoomMessage({ type: 'START_COUNTDOWN', count: countdown });
 
     const cInterval = setInterval(() => {
       countdown--;
       if (countdown >= 0) {
-        broadcastToRoom({ type: 'START_COUNTDOWN', count: countdown });
+        publishRoomMessage({ type: 'START_COUNTDOWN', count: countdown });
       } else {
         clearInterval(cInterval);
-        handleClientReceivedData({
-          type: 'GAME_STARTED_PERSONAL',
-          questions: hostQuestions
-        });
       }
     }, 1000);
 
-    sendHeartbeat();
+    sendLobbyPresence();
   });
 
   function hostFinishGame() {
@@ -1414,12 +1399,12 @@ document.addEventListener('DOMContentLoaded', () => {
       accuracy: Math.round((p.correctCount / (room.questionCount || 1)) * 100)
     })).sort((a, b) => b.score - a.score);
 
-    broadcastToRoom({
+    publishRoomMessage({
       type: 'GAME_OVER',
       leaderboard: finalLeaderboard
     });
 
-    sendHeartbeat();
+    sendLobbyPresence();
   }
 
   function hostResetRoomForNewGame() {
@@ -1436,22 +1421,46 @@ document.addEventListener('DOMContentLoaded', () => {
       p.isReady = p.isHost;
     });
 
-    broadcastToRoom({
+    publishRoomMessage({
       type: 'ROOM_RESET',
       room: room
     });
 
-    sendHeartbeat();
+    sendLobbyPresence();
+  }
+
+  function hostKickPlayer(playerId, playerName) {
+    const room = state.multi.room;
+    if (!room || !state.multi.isHost) return;
+
+    publishRoomMessage({
+      type: 'KICKED',
+      targetId: playerId,
+      message: 'Хост виключив вас із кімнати'
+    });
+
+    delete room.players[playerId];
+
+    showToast(`Гравця ${playerName || ''} кікнуто`, 'info');
+    publishRoomMessage({ type: 'ROOM_UPDATED', room: room });
+    publishRoomMessage({
+      type: 'CHAT_MSG',
+      sender: 'Система',
+      avatar: '🚫',
+      text: `Гравця ${playerName || 'учасника'} було виключено хостом`,
+      time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+    });
+
+    renderWaitingRoom();
+    sendLobbyPresence();
   }
 
   document.getElementById('btnToggleReady').addEventListener('click', () => {
     window.soundController.playClick();
-    if (state.multi.hostConn) {
-      state.multi.hostConn.send({
-        type: 'TOGGLE_READY',
-        playerId: state.user.id
-      });
-    }
+    publishRoomMessage({
+      type: 'TOGGLE_READY',
+      playerId: state.user.id
+    });
   });
 
   document.getElementById('formRoomChat').addEventListener('submit', (e) => {
@@ -1460,19 +1469,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const text = input.value.trim();
     if (!text) return;
 
-    const chatPayload = {
+    publishRoomMessage({
       type: 'CHAT_MSG',
       sender: state.user.name,
       avatar: state.user.avatar,
       text,
       time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
-    };
-
-    if (state.multi.isHost) {
-      broadcastToRoom(chatPayload);
-    } else if (state.multi.hostConn) {
-      state.multi.hostConn.send(chatPayload);
-    }
+    });
 
     input.value = '';
   });
@@ -1531,7 +1534,7 @@ document.addEventListener('DOMContentLoaded', () => {
           kickBtn.addEventListener('click', (e) => {
             e.stopPropagation();
             if (confirm(`Ви дійсно хочете кікнути гравця "${p.name}"?`)) {
-              hostKickPlayer(p.id, p.peerId, p.name);
+              hostKickPlayer(p.id, p.name);
             }
           });
         }
@@ -1563,32 +1566,44 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function leaveCurrentLobby() {
-    stopLobbyHeartbeat();
-
-    if (state.multi.isHost) {
-      broadcastToRoom({
-        type: 'CHAT_MSG',
-        sender: 'Система',
-        avatar: '⚠️',
-        text: 'Хост закрив лобі',
-        time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
-      });
+    stopLobbyPresenceHeartbeat();
+    if (state.multi.playerHeartbeatInterval) {
+      clearInterval(state.multi.playerHeartbeatInterval);
+      state.multi.playerHeartbeatInterval = null;
+    }
+    if (state.multi.joinTimeout) {
+      clearTimeout(state.multi.joinTimeout);
+      state.multi.joinTimeout = null;
     }
 
-    if (state.multi.hostConn) {
-      state.multi.hostConn.close();
-      state.multi.hostConn = null;
+    if (state.multi.room) {
+      if (state.multi.isHost) {
+        publishPresenceMessage({ type: 'LOBBY_CLOSED', code: state.multi.room.code });
+        publishRoomMessage({
+          type: 'CHAT_MSG',
+          sender: 'Система',
+          avatar: '⚠️',
+          text: 'Хост закрив лобі',
+          time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+        });
+      } else {
+        publishRoomMessage({
+          type: 'CHAT_MSG',
+          sender: 'Система',
+          avatar: '🚪',
+          text: `Гравець ${state.user.name} вийшов з лобі`,
+          time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+        });
+      }
     }
 
-    state.multi.guestConns.forEach(c => c.close());
-    state.multi.guestConns.clear();
-
-    if (state.multi.peer) {
-      state.multi.peer.destroy();
-      state.multi.peer = null;
+    if (mqttClient && state.multi.roomTopic) {
+      mqttClient.unsubscribe(state.multi.roomTopic);
     }
 
     state.multi.room = null;
+    state.multi.currentRoomCode = null;
+    state.multi.roomTopic = null;
     state.multi.isHost = false;
   }
 
@@ -1695,11 +1710,11 @@ document.addEventListener('DOMContentLoaded', () => {
   if (joinParam) {
     setTimeout(() => {
       joinLobbyByCode(joinParam);
-    }, 500);
+    }, 600);
   }
 
   // Init
   initUser();
-  initGlobalLobbyBroker();
+  initMqtt();
   renderLobbiesList();
 });
