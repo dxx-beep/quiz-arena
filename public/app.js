@@ -1025,6 +1025,9 @@ document.addEventListener('DOMContentLoaded', () => {
         window.soundController.playCountdownTick();
       } else {
         window.soundController.playStartBeep();
+        setTimeout(() => {
+          countdownOverlay.style.display = 'none';
+        }, 750);
       }
     }
 
@@ -1360,25 +1363,28 @@ document.addEventListener('DOMContentLoaded', () => {
 
     room.status = 'playing';
 
-    // Broadcast individual questions to each player
-    Object.keys(room.players).forEach(playerId => {
-      const playerQuestions = shuffle(filtered).slice(0, Math.min(qCount, filtered.length));
-      publishRoomMessage({
-        type: 'GAME_STARTED_FOR_PLAYER',
-        targetId: playerId,
-        questions: playerQuestions
-      });
-    });
-
+    // Step 1: Run 3..2..1..GO countdown
     let countdown = 3;
     publishRoomMessage({ type: 'START_COUNTDOWN', count: countdown });
 
     const cInterval = setInterval(() => {
       countdown--;
-      if (countdown >= 0) {
+      if (countdown > 0) {
         publishRoomMessage({ type: 'START_COUNTDOWN', count: countdown });
+      } else if (countdown === 0) {
+        publishRoomMessage({ type: 'START_COUNTDOWN', count: 0 }); // "GO!"
       } else {
         clearInterval(cInterval);
+
+        // Step 2: Send individualized questions to each player and launch game
+        Object.keys(room.players).forEach(playerId => {
+          const playerQuestions = shuffle(filtered).slice(0, Math.min(qCount, filtered.length));
+          publishRoomMessage({
+            type: 'GAME_STARTED_FOR_PLAYER',
+            targetId: playerId,
+            questions: playerQuestions
+          });
+        });
       }
     }, 1000);
 
