@@ -622,6 +622,21 @@ body {
   font-weight: 700;
   padding: 0.3rem 0.8rem;
   border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.diff-badge-easy {
+  background: var(--success-light) !important;
+  color: var(--success) !important;
+}
+.diff-badge-medium {
+  background: rgba(245, 158, 11, 0.18) !important;
+  color: var(--warning) !important;
+}
+.diff-badge-hard {
+  background: var(--danger-light) !important;
+  color: var(--danger) !important;
 }
 .progress-counter {
   font-weight: 800;

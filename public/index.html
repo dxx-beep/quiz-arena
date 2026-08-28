@@ -138,11 +138,14 @@
         </div>
       </div>
 
-      <!-- 3. Category selection -->
+      <!-- 3. Difficulty -->
       <div>
-        <label class="form-label" style="font-size: 1rem;">3. Оберіть категорію:</label>
-        <div class="categories-grid" id="soloCategoriesGrid">
-          <!-- Categories loaded via API -->
+        <label class="form-label" style="font-size: 1rem;">3. Складність запитань:</label>
+        <div class="selector-group" id="soloDiffSelectors">
+          <button class="chip-btn active" data-diff="all">🎲 Змішана (Мікс)</button>
+          <button class="chip-btn" data-diff="easy">🟢 Легкі</button>
+          <button class="chip-btn" data-diff="medium">🟡 Середні</button>
+          <button class="chip-btn" data-diff="hard">🔴 Складні</button>
         </div>
       </div>
 
@@ -375,6 +378,16 @@
             <button type="button" class="chip-btn active" data-count="10">10 питань</button>
             <button type="button" class="chip-btn" data-count="15">15 питань</button>
             <button type="button" class="chip-btn" data-count="25">25 питань</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Складність запитань:</label>
+          <div class="selector-group" id="lobbyDiffSelectors">
+            <button type="button" class="chip-btn active" data-diff="all">🎲 Мікс</button>
+            <button type="button" class="chip-btn" data-diff="easy">🟢 Легкі</button>
+            <button type="button" class="chip-btn" data-diff="medium">🟡 Середні</button>
+            <button type="button" class="chip-btn" data-diff="hard">🔴 Складні</button>
           </div>
         </div>
 

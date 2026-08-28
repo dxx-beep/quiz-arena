@@ -1,4 +1,4 @@
-// QuizArena - 100% REAL Multiplayer & Pure Logic Quiz Engine
+// QuizArena - 100% Real Multiplayer with Easy/Medium/Hard Difficulty Levels
 document.addEventListener('DOMContentLoaded', () => {
   // App State
   const state = {
@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
     solo: {
       count: 10,
       timeLimit: 15,
+      difficulty: 'all',
       questions: [],
       currentIndex: 0,
       score: 0,
@@ -24,7 +25,7 @@ document.addEventListener('DOMContentLoaded', () => {
       timeRemaining: 15
     },
 
-    // 100% REAL Multiplayer State (PeerJS WebRTC + MQTT for Global Discovery)
+    // Real Multiplayer State (P2P via PeerJS + Global MQTT Broker)
     multi: {
       peer: null,
       peerId: null,
@@ -42,7 +43,7 @@ document.addEventListener('DOMContentLoaded', () => {
       timerInterval: null,
       hasAnsweredCurrent: false,
       isFinished: false,
-      publicLobbies: new Map(), // map of real lobbies { [code]: lobbyData }
+      publicLobbies: new Map(),
       announceInterval: null
     }
   };
@@ -87,7 +88,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         mqttClient.on('connect', () => {
-          console.log('🌐 Connected to global lobby broker');
           mqttClient.subscribe(MQTT_TOPIC);
         });
 
@@ -98,9 +98,7 @@ document.addEventListener('DOMContentLoaded', () => {
           } catch (e) {}
         });
       }
-    } catch (e) {
-      console.log('MQTT broker fallback');
-    }
+    } catch (e) {}
   }
 
   const localBroadcast = window.BroadcastChannel ? new BroadcastChannel('quiz_arena_local_channel') : null;
@@ -128,7 +126,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // Cleanup stale lobbies (> 12 seconds without heartbeat)
   setInterval(() => {
     const now = Date.now();
     let changed = false;
@@ -156,12 +153,8 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (state.multi.room) {
       const payload = JSON.stringify({ type: 'LOBBY_CLOSED', code: state.multi.room.code });
-      if (mqttClient && mqttClient.connected) {
-        mqttClient.publish(MQTT_TOPIC, payload);
-      }
-      if (localBroadcast) {
-        localBroadcast.postMessage({ type: 'LOBBY_CLOSED', code: state.multi.room.code });
-      }
+      if (mqttClient && mqttClient.connected) mqttClient.publish(MQTT_TOPIC, payload);
+      if (localBroadcast) localBroadcast.postMessage({ type: 'LOBBY_CLOSED', code: state.multi.room.code });
     }
   }
 
@@ -177,6 +170,7 @@ document.addEventListener('DOMContentLoaded', () => {
       maxPlayers: room.maxPlayers,
       questionCount: room.questionCount,
       timePerQuestion: room.timePerQuestion,
+      difficulty: room.difficulty || 'all',
       status: room.status
     };
 
@@ -185,12 +179,8 @@ document.addEventListener('DOMContentLoaded', () => {
       lobby: lobbyData
     });
 
-    if (mqttClient && mqttClient.connected) {
-      mqttClient.publish(MQTT_TOPIC, payload);
-    }
-    if (localBroadcast) {
-      localBroadcast.postMessage({ type: 'LOBBY_HEARTBEAT', lobby: lobbyData });
-    }
+    if (mqttClient && mqttClient.connected) mqttClient.publish(MQTT_TOPIC, payload);
+    if (localBroadcast) localBroadcast.postMessage({ type: 'LOBBY_HEARTBEAT', lobby: lobbyData });
   }
 
   // -------------------------------------------------------------
@@ -317,6 +307,13 @@ document.addEventListener('DOMContentLoaded', () => {
     return arr;
   }
 
+  function getDifficultyInfo(diff) {
+    if (diff === 'easy') return { label: '🟢 Легке', badgeClass: 'diff-badge-easy', basePoints: 100 };
+    if (diff === 'medium') return { label: '🟡 Середнє', badgeClass: 'diff-badge-medium', basePoints: 150 };
+    if (diff === 'hard') return { label: '🔴 Складне', badgeClass: 'diff-badge-hard', basePoints: 250 };
+    return { label: '🎲 Логіка', badgeClass: '', basePoints: 100 };
+  }
+
   // -------------------------------------------------------------
   // HOME ACTIONS
   // -------------------------------------------------------------
@@ -355,7 +352,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // -------------------------------------------------------------
-  // SOLO MODE
+  // SOLO SETUP & GAMEPLAY
   // -------------------------------------------------------------
   document.querySelectorAll('#soloCountSelectors .chip-btn').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -375,11 +372,27 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  document.querySelectorAll('#soloDiffSelectors .chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#soloDiffSelectors .chip-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.solo.difficulty = btn.getAttribute('data-diff');
+      window.soundController.playClick();
+    });
+  });
+
   document.getElementById('btnStartSoloGame').addEventListener('click', () => {
     window.soundController.playClick();
     const pool = window.QUIZ_QUESTIONS || [];
-    const count = Math.min(state.solo.count, pool.length);
-    const shuffled = shuffle(pool);
+    
+    // Filter questions by difficulty
+    let filtered = pool;
+    if (state.solo.difficulty !== 'all') {
+      filtered = pool.filter(q => q.difficulty === state.solo.difficulty);
+    }
+
+    const count = Math.min(state.solo.count, filtered.length);
+    const shuffled = shuffle(filtered);
 
     state.solo.questions = shuffled.slice(0, count);
     state.solo.currentIndex = 0;
@@ -400,8 +413,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const q = state.solo.questions[state.solo.currentIndex];
     const total = state.solo.questions.length;
+    const diffInfo = getDifficultyInfo(q.difficulty);
 
-    document.getElementById('gameCategoryBadge').textContent = 'Логічна загадка';
+    const badge = document.getElementById('gameCategoryBadge');
+    badge.textContent = `${diffInfo.label} • +${diffInfo.basePoints} балів`;
+    badge.className = `category-badge ${diffInfo.badgeClass}`;
+
     document.getElementById('gameCurrentQNum').textContent = state.solo.currentIndex + 1;
     document.getElementById('gameTotalQNum').textContent = total;
     document.getElementById('gameScoreBadge').textContent = `🏆 ${state.solo.score} очок`;
@@ -463,6 +480,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const q = state.solo.questions[state.solo.currentIndex];
     const isCorrect = selectedIdx === q.correctIndex;
+    const diffInfo = getDifficultyInfo(q.difficulty);
 
     const allBtns = document.querySelectorAll('#gameOptionsContainer .option-btn');
     allBtns.forEach((b, idx) => {
@@ -479,7 +497,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.solo.correctCount++;
       const timeBonus = state.solo.timeLimit > 0 ? Math.round((state.solo.timeRemaining / state.solo.timeLimit) * 50) : 0;
       const streakBonus = Math.min(state.solo.streak * 10, 50);
-      const points = 100 + timeBonus + streakBonus;
+      const points = diffInfo.basePoints + timeBonus + streakBonus;
       state.solo.score += points;
       window.soundController.playCorrect();
       showToast(`+${points} очок! 🔥 Серія: ${state.solo.streak}`, 'success');
@@ -612,7 +630,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // -------------------------------------------------------------
-  // 100% REAL P2P MULTIPLAYER LOBBY VIA PEERJS
+  // MULTIPLAYER LOBBY WITH DIFFICULTY TIERS & KICK SUPPORT
   // -------------------------------------------------------------
   const btnOpenCreateLobbyModal = document.getElementById('btnOpenCreateLobbyModal');
   const btnOpenCreateLobbyFromList = document.getElementById('btnOpenCreateLobbyFromList');
@@ -640,6 +658,16 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
+  let lobbyDifficulty = 'all';
+  document.querySelectorAll('#lobbyDiffSelectors .chip-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#lobbyDiffSelectors .chip-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      lobbyDifficulty = btn.getAttribute('data-diff');
+      window.soundController.playClick();
+    });
+  });
+
   document.getElementById('formCreateLobby').addEventListener('submit', (e) => {
     e.preventDefault();
     const roomName = document.getElementById('inputLobbyName').value.trim();
@@ -653,6 +681,7 @@ document.addEventListener('DOMContentLoaded', () => {
     hostCreateRoom({
       name: roomName,
       questionCount: lobbyQuestionCount,
+      difficulty: lobbyDifficulty,
       timePerQuestion,
       maxPlayers,
       isPrivate
@@ -661,7 +690,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function hostCreateRoom(opts) {
     leaveCurrentLobby();
-    showToast('Створення реальної кімнати...', 'info');
+    showToast('Створення кімнати...', 'info');
 
     const randomSuffix = Math.floor(1000 + Math.random() * 9000);
     const roomCode = `Q-${randomSuffix}`;
@@ -681,6 +710,7 @@ document.addEventListener('DOMContentLoaded', () => {
         hostId: state.user.id,
         hostName: state.user.name,
         questionCount: opts.questionCount || 10,
+        difficulty: opts.difficulty || 'all',
         timePerQuestion: opts.timePerQuestion || 15,
         maxPlayers: opts.maxPlayers || 8,
         isPrivate: opts.isPrivate,
@@ -705,13 +735,13 @@ document.addEventListener('DOMContentLoaded', () => {
       state.multi.room = room;
       renderWaitingRoom();
       showScreen('screenLobbyRoom');
-      showToast(`Лобі ${roomCode} відкрито! Запросіть реальних друзів`, 'success');
+      showToast(`Лобі ${roomCode} відкрито! Запросіть друзів`, 'success');
       startLobbyHeartbeat();
     });
 
     peer.on('connection', (conn) => {
       conn.on('open', () => {
-        console.log('👋 Реальний гравець підключився:', conn.peer);
+        console.log('👋 Підключився реальний гравець:', conn.peer);
       });
 
       conn.on('data', (data) => {
@@ -1101,15 +1131,20 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // -------------------------------------------------------------
-  // INDIVIDUAL MULTIPLAYER GAMEPLAY
+  // INDIVIDUAL MULTIPLAYER GAMEPLAY WITH DIFFICULTY MULTIPLIERS
   // -------------------------------------------------------------
   function startMultiplayerIndividualQuestion() {
     const q = state.multi.myQuestions[state.multi.currentIndex];
     const total = state.multi.myQuestions.length;
+    const diffInfo = getDifficultyInfo(q.difficulty);
 
     document.getElementById('gameExplanationBox').style.display = 'none';
     document.getElementById('btnSoloNextQuestion').style.display = 'none';
-    document.getElementById('gameCategoryBadge').textContent = '🎲 Ваше унікальне питання';
+    
+    const badge = document.getElementById('gameCategoryBadge');
+    badge.textContent = `${diffInfo.label} • +${diffInfo.basePoints} балів`;
+    badge.className = `category-badge ${diffInfo.badgeClass}`;
+
     document.getElementById('gameCurrentQNum').textContent = state.multi.currentIndex + 1;
     document.getElementById('gameTotalQNum').textContent = total;
     document.getElementById('gameScoreBadge').textContent = `🏆 ${state.multi.score} очок`;
@@ -1167,6 +1202,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const q = state.multi.myQuestions[state.multi.currentIndex];
     const isCorrect = selectedIdx === q.correctIndex;
+    const diffInfo = getDifficultyInfo(q.difficulty);
 
     const allBtns = document.querySelectorAll('#gameOptionsContainer .option-btn');
     allBtns.forEach((b, idx) => {
@@ -1184,7 +1220,7 @@ document.addEventListener('DOMContentLoaded', () => {
       state.multi.correctCount++;
       const timeBonus = Math.round((state.multi.timeRemaining / timeLimit) * 50);
       const streakBonus = Math.min(state.multi.streak * 10, 50);
-      const points = 100 + timeBonus + streakBonus;
+      const points = diffInfo.basePoints + timeBonus + streakBonus;
       state.multi.score += points;
       window.soundController.playCorrect();
       showToast(`+${points} очок! 🔥 Серія: ${state.multi.streak}`, 'success');
@@ -1317,7 +1353,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // -------------------------------------------------------------
-  // HOST: START GAME WITH UNIQUE QUESTIONS FOR EACH REAL PLAYER
+  // HOST: START GAME WITH UNIQUE QUESTIONS ACCORDING TO DIFFICULTY
   // -------------------------------------------------------------
   document.getElementById('btnHostStartGame').addEventListener('click', () => {
     window.soundController.playClick();
@@ -1326,12 +1362,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const pool = window.QUIZ_QUESTIONS || [];
     const qCount = room.questionCount;
+    const diff = room.difficulty || 'all';
+
+    let filtered = pool;
+    if (diff !== 'all') {
+      filtered = pool.filter(q => q.difficulty === diff);
+    }
+
     room.status = 'playing';
 
-    const hostQuestions = shuffle(pool).slice(0, Math.min(qCount, pool.length));
+    const hostQuestions = shuffle(filtered).slice(0, Math.min(qCount, filtered.length));
 
     state.multi.guestConns.forEach((conn, guestPeerId) => {
-      const guestQuestions = shuffle(pool).slice(0, Math.min(qCount, pool.length));
+      const guestQuestions = shuffle(filtered).slice(0, Math.min(qCount, filtered.length));
       conn.send({
         type: 'GAME_STARTED_PERSONAL',
         questions: guestQuestions
@@ -1451,8 +1494,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const room = state.multi.room;
     if (!room) return;
 
+    const diffNames = { all: '🎲 Змішана', easy: '🟢 Легкі', medium: '🟡 Середні', hard: '🔴 Складні' };
+    const diffLabel = diffNames[room.difficulty || 'all'] || '🎲 Змішана';
+
     document.getElementById('roomTitleText').textContent = room.name;
-    document.getElementById('roomCategoryText').textContent = 'Логічні загадки (У кожного свої питання)';
+    document.getElementById('roomCategoryText').textContent = `Складність: ${diffLabel}`;
     document.getElementById('roomQuestionCountText').textContent = `${room.questionCount} питань`;
     document.getElementById('roomTimeText').textContent = `${room.timePerQuestion}с`;
     document.getElementById('roomCodeDisplay').textContent = room.code;
@@ -1464,22 +1510,36 @@ document.addEventListener('DOMContentLoaded', () => {
     const playersList = document.getElementById('roomPlayersList');
     playersList.innerHTML = '';
 
+    const isHost = state.multi.isHost;
     playersArr.forEach(p => {
       const isMe = (p.id === state.user.id);
       const card = document.createElement('div');
       card.className = `player-slot-card ${p.isReady ? 'is-ready' : ''}`;
       card.innerHTML = `
         ${p.isHost ? '<span class="host-badge">👑 ХОСТ</span>' : ''}
+        ${isHost && !p.isHost ? `<button class="kick-btn" title="Кікнути ${p.name}">✕</button>` : ''}
         <div class="avatar-big">${p.avatar}</div>
         <div class="p-name">${p.name} ${isMe ? '(Ви)' : ''}</div>
         <div class="ready-status ${p.isReady ? 'ready' : 'not-ready'}">
           ${p.isHost ? 'Готовий до старту' : p.isReady ? '✅ Готовий' : '⏳ Не готовий'}
         </div>
       `;
+
+      if (isHost && !p.isHost) {
+        const kickBtn = card.querySelector('.kick-btn');
+        if (kickBtn) {
+          kickBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (confirm(`Ви дійсно хочете кікнути гравця "${p.name}"?`)) {
+              hostKickPlayer(p.id, p.peerId, p.name);
+            }
+          });
+        }
+      }
+
       playersList.appendChild(card);
     });
 
-    const isHost = state.multi.isHost;
     const btnHostStartGame = document.getElementById('btnHostStartGame');
     const btnToggleReady = document.getElementById('btnToggleReady');
 
@@ -1581,11 +1641,19 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
+    const diffBadges = {
+      all: '🎲 Мікс',
+      easy: '🟢 Легкі',
+      medium: '🟡 Середні',
+      hard: '🔴 Складні'
+    };
+
     list.forEach(lobby => {
       const card = document.createElement('div');
       card.className = 'lobby-item-card';
       const isFull = lobby.playerCount >= lobby.maxPlayers;
       const isPlaying = lobby.status === 'playing';
+      const diffTag = diffBadges[lobby.difficulty || 'all'] || '🎲 Мікс';
 
       card.innerHTML = `
         <div class="lobby-card-header">
@@ -1598,6 +1666,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="lobby-meta-row">
           <span>👑 Хост: <strong>${lobby.hostName}</strong></span>
           <span>👥 Гравці: <strong>${lobby.playerCount}/${lobby.maxPlayers}</strong></span>
+          <span>${diffTag}</span>
           <span>❓ ${lobby.questionCount} пит.</span>
           <span>⏱️ ${lobby.timePerQuestion}с</span>
         </div>
