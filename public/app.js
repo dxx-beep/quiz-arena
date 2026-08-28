@@ -875,6 +875,34 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
+  function hostKickPlayer(playerId, peerId, playerName) {
+    const room = state.multi.room;
+    if (!room || !state.multi.isHost) return;
+
+    const conn = state.multi.guestConns.get(peerId);
+    if (conn && conn.open) {
+      try {
+        conn.send({ type: 'KICKED', message: 'Хост виключив вас із кімнати' });
+        setTimeout(() => conn.close(), 100);
+      } catch (e) {}
+    }
+
+    state.multi.guestConns.delete(peerId);
+    delete room.players[playerId];
+
+    showToast(`Гравця ${playerName || ''} кікнуто`, 'info');
+    broadcastToRoom({ type: 'ROOM_UPDATED', room: room });
+    broadcastToRoom({
+      type: 'CHAT_MSG',
+      sender: 'Система',
+      avatar: '🚫',
+      text: `Гравця ${playerName || 'учасника'} було виключено хостом`,
+      time: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })
+    });
+    renderWaitingRoom();
+    sendHeartbeat();
+  }
+
   function broadcastToRoom(msg) {
     state.multi.guestConns.forEach(conn => {
       if (conn.open) {
@@ -945,6 +973,13 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast(data.message || 'Не вдалося увійти в кімнату', 'error');
       leaveCurrentLobby();
       showScreen('screenLobbies');
+    }
+
+    if (data.type === 'KICKED') {
+      showToast(data.message || 'Вас було виключено з кімнати хостом', 'error');
+      leaveCurrentLobby();
+      showScreen('screenLobbies');
+      renderLobbiesList();
     }
 
     if (data.type === 'ROOM_UPDATED') {
