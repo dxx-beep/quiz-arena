@@ -1013,6 +1013,26 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
+    if (data.type === 'PLAYER_PROGRESS_UPDATE') {
+      if (room && room.players[data.playerId]) {
+        room.players[data.playerId].score = data.score;
+        room.players[data.playerId].streak = data.streak;
+        room.players[data.playerId].correctCount = data.correctCount;
+        room.players[data.playerId].progress = data.progress;
+        room.players[data.playerId].finished = data.finished;
+        room.players[data.playerId].lastSeen = Date.now();
+        renderRaceBoard(Object.values(room.players));
+      }
+
+      // Host checks if everyone finished to trigger game over
+      if (state.multi.isHost && room && room.status === 'playing') {
+        const allFinished = Object.values(room.players).every(pl => pl.finished);
+        if (allFinished) {
+          hostFinishGame();
+        }
+      }
+    }
+
     if (data.type === 'JOIN_SUCCESS' && data.targetId === state.user.id) {
       if (state.multi.joinTimeout) clearTimeout(state.multi.joinTimeout);
       state.multi.room = data.room;
@@ -1081,6 +1101,16 @@ document.addEventListener('DOMContentLoaded', () => {
       state.multi.correctCount = 0;
       state.multi.userAnswers = [];
       state.multi.isFinished = false;
+
+      // Reset all players stats in local room state & render initial board
+      if (state.multi.room) {
+        Object.values(state.multi.room.players).forEach(p => {
+          p.score = 0;
+          p.progress = 0;
+          p.finished = false;
+        });
+        renderRaceBoard(Object.values(state.multi.room.players));
+      }
 
       startMultiplayerIndividualQuestion();
     }
@@ -1353,18 +1383,28 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function sendMyProgressUpdate() {
-    const total = state.multi.myQuestions.length;
-    const currentProg = state.multi.currentIndex + 1;
-    const isFinished = currentProg >= total;
+    const total = state.multi.myQuestions.length || (state.multi.room?.questionCount || 10);
+    const answeredCount = state.multi.userAnswers.length;
+    const isFinished = (answeredCount >= total) || state.multi.isFinished;
+
+    const myProgressData = {
+      score: state.multi.score,
+      streak: state.multi.streak,
+      correctCount: state.multi.correctCount,
+      progress: Math.min(answeredCount, total),
+      finished: isFinished
+    };
+
+    // Update local state immediately for zero latency
+    if (state.multi.room && state.multi.room.players[state.user.id]) {
+      Object.assign(state.multi.room.players[state.user.id], myProgressData);
+      renderRaceBoard(Object.values(state.multi.room.players));
+    }
 
     publishRoomMessage({
       type: 'PLAYER_PROGRESS_UPDATE',
       playerId: state.user.id,
-      score: state.multi.score,
-      streak: state.multi.streak,
-      correctCount: state.multi.correctCount,
-      progress: Math.min(currentProg, total),
-      finished: isFinished
+      ...myProgressData
     });
   }
 
@@ -1378,7 +1418,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⏳</div>
         <h3>Ваш результат: ${state.multi.score} очок</h3>
         <p style="color: var(--text-muted);">Правильних відповідей: ${state.multi.correctCount} / ${state.multi.myQuestions.length}</p>
-        <p style="margin-top: 0.75rem; font-size: 0.9rem;">Слідкуйте за реальним прогресом друзів нижче ⬇️</p>
+        <p style="margin-top: 0.75rem; font-size: 0.9rem;">Слідкуйте за живим прогресом інших гравців нижче ⬇️</p>
       </div>
     `;
     document.getElementById('soloNextBtnContainer').style.display = 'none';
@@ -1386,31 +1426,46 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function renderRaceBoard(playersList) {
-    const list = playersList || [];
+    const list = playersList || (state.multi.room ? Object.values(state.multi.room.players) : []);
     const totalQ = state.multi.room?.questionCount || 10;
     const totalPlayers = list.length;
-    const finishedCount = list.filter(p => p.finished).length;
+    const finishedCount = list.filter(p => p.finished || (p.progress >= totalQ)).length;
 
-    document.getElementById('gameRaceCountText').textContent = `${finishedCount} / ${totalPlayers} фінішували`;
+    const raceCountEl = document.getElementById('gameRaceCountText');
+    if (raceCountEl) {
+      raceCountEl.textContent = `${finishedCount} / ${totalPlayers} фінішували`;
+    }
 
     const container = document.getElementById('gameRacePlayersList');
+    if (!container) return;
     container.innerHTML = '';
 
-    list.sort((a, b) => b.score - a.score);
+    // Sort by progress descending, then by score descending
+    const sorted = [...list].sort((a, b) => {
+      const aDone = a.finished ? 1 : 0;
+      const bDone = b.finished ? 1 : 0;
+      if (bDone !== aDone) return bDone - aDone;
+      if ((b.progress || 0) !== (a.progress || 0)) return (b.progress || 0) - (a.progress || 0);
+      return (b.score || 0) - (a.score || 0);
+    });
 
-    list.forEach(p => {
+    sorted.forEach(p => {
       const isMe = (p.id === state.user.id);
       const row = document.createElement('div');
       row.className = 'race-player-row';
-      const pct = Math.round(((p.progress || 0) / totalQ) * 100);
+      const curProg = Math.min(p.progress || 0, totalQ);
+      const pct = Math.round((curProg / totalQ) * 100);
+      const isDone = p.finished || curProg >= totalQ;
 
       row.innerHTML = `
         <span class="r-avatar">${p.avatar}</span>
-        <span class="r-name">${p.name} ${isMe ? '(Ви)' : ''}</span>
+        <span class="r-name">${p.name} ${isMe ? '<strong>(Ви)</strong>' : ''}</span>
         <div class="race-bar-bg">
-          <div class="race-bar-fill" style="width: ${pct}%;"></div>
+          <div class="race-bar-fill ${isDone ? 'finished' : ''}" style="width: ${pct}%;"></div>
         </div>
-        <span style="font-size: 0.75rem; color: var(--text-muted); min-width: 45px;">${p.progress || 0}/${totalQ}</span>
+        <span style="font-size: 0.75rem; color: ${isDone ? 'var(--success)' : 'var(--text-muted)'}; min-width: 50px; font-weight: ${isDone ? '700' : '500'};">
+          ${isDone ? '🏁 Фініш' : `${curProg}/${totalQ}`}
+        </span>
         <span class="r-score">${p.score || 0}</span>
       `;
       container.appendChild(row);

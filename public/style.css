@@ -780,7 +780,7 @@ body {
 .race-player-row .r-name { font-weight: 700; width: 100px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .race-bar-bg {
   flex-grow: 1;
-  height: 9px;
+  height: 10px;
   background: var(--border);
   border-radius: var(--radius-full);
   overflow: hidden;
@@ -788,7 +788,11 @@ body {
 .race-bar-fill {
   height: 100%;
   background: linear-gradient(90deg, var(--primary), var(--secondary));
-  transition: width 0.3s ease;
+  transition: width 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: var(--radius-full);
+}
+.race-bar-fill.finished {
+  background: linear-gradient(90deg, #10b981, #059669) !important;
 }
 .race-player-row .r-score { font-weight: 800; color: var(--primary); min-width: 60px; text-align: right; }
 
