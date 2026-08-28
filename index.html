@@ -53,9 +53,9 @@
     <!-- SCREEN 1: HOME -->
     <section id="screenHome" class="view-screen active">
       <div class="hero-card">
-        <h1 class="hero-title">Перевір свої знання в <span>QuizArena</span></h1>
+        <h1 class="hero-title">Перевір свою логіку в <span>QuizArena</span></h1>
         <p class="hero-desc">
-          Проходь захопливі тести на 10, 20 або 40 запитань наодинці або змагайся з друзями в реальному часі у спільних лобі!
+          Хитрі логічні загадки та питання на кмітливість на 5, 10, 15 або 25 запитань. Проходь тест наодинці або змагайся з друзями в лобі!
         </p>
         <div style="display: flex; gap: 1rem; justify-content: center; flex-wrap: wrap;">
           <button class="btn btn-primary btn-lg" id="btnGoSolo">
@@ -121,10 +121,10 @@
       <div>
         <label class="form-label" style="font-size: 1rem;">1. Кількість питань:</label>
         <div class="selector-group" id="soloCountSelectors">
-          <button class="chip-btn active" data-count="10">10 питань (Швидкий)</button>
-          <button class="chip-btn" data-count="20">20 питань (Стандарт)</button>
-          <button class="chip-btn" data-count="40">40 питань (Марафон)</button>
-          <button class="chip-btn" data-count="60">Всі доступні</button>
+          <button class="chip-btn" data-count="5">5 питань (Експрес)</button>
+          <button class="chip-btn active" data-count="10">10 питань (Стандарт)</button>
+          <button class="chip-btn" data-count="15">15 питань (Логік)</button>
+          <button class="chip-btn" data-count="25">25 питань (Всі загадки)</button>
         </div>
       </div>
 
@@ -373,9 +373,10 @@
         <div class="form-group">
           <label class="form-label">Кількість питань:</label>
           <div class="selector-group" id="lobbyCountSelectors">
+            <button type="button" class="chip-btn" data-count="5">5 питань</button>
             <button type="button" class="chip-btn active" data-count="10">10 питань</button>
-            <button type="button" class="chip-btn" data-count="20">20 питань</button>
-            <button type="button" class="chip-btn" data-count="40">40 питань</button>
+            <button type="button" class="chip-btn" data-count="15">15 питань</button>
+            <button type="button" class="chip-btn" data-count="25">25 питань</button>
           </div>
         </div>
 
