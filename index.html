@@ -267,14 +267,19 @@
           <div id="gameExplanationText"></div>
         </div>
 
-        <!-- Live status in multiplayer -->
-        <div class="live-answered-indicator" id="gameLiveIndicator" style="display: none;">
-          <span>👥 Статус раунду:</span>
-          <span id="gameAnsweredStatusText">Відповіло: 0 / 0</span>
+        <!-- Live status & Race Tracker in multiplayer -->
+        <div class="live-race-tracker" id="gameLiveRaceBoard" style="display: none;">
+          <div class="live-race-title">
+            <span>🏁 Живий прогрес учасників:</span>
+            <span id="gameRaceCountText">0 / 0 фінішували</span>
+          </div>
+          <div class="race-players-list" id="gameRacePlayersList">
+            <!-- Dynamic player race bars -->
+          </div>
         </div>
 
-        <!-- Solo next question button -->
-        <div style="text-align: right; margin-top: 1.5rem;" id="soloNextBtnContainer" style="display: none;">
+        <!-- Next question button (Solo / Lobby) -->
+        <div style="text-align: right; margin-top: 1.5rem;" id="soloNextBtnContainer">
           <button class="btn btn-primary" id="btnSoloNextQuestion" style="display: none;">
             Наступне питання →
           </button>

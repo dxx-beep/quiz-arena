@@ -1,4 +1,4 @@
-// QuizArena - Real P2P WebRTC Multiplayer & Solo Engine via PeerJS
+// QuizArena - Individual Randomized Questions per Player & Real P2P WebRTC
 document.addEventListener('DOMContentLoaded', () => {
   // App State
   const state = {
@@ -29,12 +29,19 @@ document.addEventListener('DOMContentLoaded', () => {
       peer: null,
       peerId: null,
       isHost: false,
-      hostConn: null,       // Guest's connection to host
-      guestConns: new Map(),// Host's connections to guests { peerId: conn }
+      hostConn: null,
+      guestConns: new Map(),
       room: null,
+      myQuestions: [],
+      currentIndex: 0,
+      score: 0,
+      streak: 0,
+      correctCount: 0,
+      userAnswers: [],
       timeRemaining: 15,
       timerInterval: null,
       hasAnsweredCurrent: false,
+      isFinished: false,
       publicLobbies: []
     }
   };
@@ -62,7 +69,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const countdownNum = document.getElementById('countdownNum');
   const toastContainer = document.getElementById('toastContainer');
 
-  // Broadcast channel for multi-tab sync & public lobby list discovery
   const broadcast = window.BroadcastChannel ? new BroadcastChannel('quiz_arena_p2p_channel') : null;
   if (broadcast) {
     broadcast.onmessage = (e) => {
@@ -143,7 +149,6 @@ document.addEventListener('DOMContentLoaded', () => {
       showToast('Профіль оновлено!', 'success');
       window.soundController.playClick();
 
-      // If currently in lobby, update info
       if (state.multi.room) {
         if (state.multi.isHost) {
           state.multi.room.players[state.user.id].name = newName;
@@ -272,7 +277,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function startSoloQuestion() {
     showScreen('screenGame');
-    document.getElementById('gameLiveIndicator').style.display = 'none';
+    document.getElementById('gameLiveRaceBoard').style.display = 'none';
     document.getElementById('soloNextBtnContainer').style.display = 'block';
     document.getElementById('btnSoloNextQuestion').style.display = 'none';
     document.getElementById('gameExplanationBox').style.display = 'none';
@@ -418,11 +423,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
   document.getElementById('btnSoloNextQuestion').addEventListener('click', () => {
     window.soundController.playClick();
-    state.solo.currentIndex++;
-    if (state.solo.currentIndex < state.solo.questions.length) {
-      startSoloQuestion();
+    if (state.multi.room) {
+      // In Multiplayer Lobby with individual questions
+      state.multi.currentIndex++;
+      if (state.multi.currentIndex < state.multi.myQuestions.length) {
+        startMultiplayerIndividualQuestion();
+      } else {
+        finishMyMultiplayerQuiz();
+      }
     } else {
-      showSoloResults();
+      // Solo
+      state.solo.currentIndex++;
+      if (state.solo.currentIndex < state.solo.questions.length) {
+        startSoloQuestion();
+      } else {
+        showSoloResults();
+      }
     }
   });
 
@@ -482,7 +498,7 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   // -------------------------------------------------------------
-  // REAL MULTIPLAYER VIA PEERJS (WebRTC P2P)
+  // REAL MULTIPLAYER VIA PEERJS WITH INDIVIDUAL RANDOMIZED QUESTIONS
   // -------------------------------------------------------------
   const btnOpenCreateLobbyModal = document.getElementById('btnOpenCreateLobbyModal');
   const btnOpenCreateLobbyFromList = document.getElementById('btnOpenCreateLobbyFromList');
@@ -510,7 +526,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // Form Create Lobby
   document.getElementById('formCreateLobby').addEventListener('submit', (e) => {
     e.preventDefault();
     const roomName = document.getElementById('inputLobbyName').value.trim();
@@ -538,11 +553,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const roomCode = `Q-${randomSuffix}`;
     const peerRoomId = `quizarena-${roomCode.toLowerCase()}`;
 
-    // Initialize PeerJS Host
-    const peer = new Peer(peerRoomId, {
-      debug: 1
-    });
-
+    const peer = new Peer(peerRoomId, { debug: 1 });
     state.multi.peer = peer;
     state.multi.isHost = true;
 
@@ -571,24 +582,20 @@ document.addEventListener('DOMContentLoaded', () => {
             isReady: true,
             score: 0,
             streak: 0,
-            correctCount: 0
+            correctCount: 0,
+            progress: 0,
+            finished: false
           }
-        },
-        questions: [],
-        currentQuestionIndex: 0,
-        answers: {}
+        }
       };
 
       state.multi.room = room;
       renderWaitingRoom();
       showScreen('screenLobbyRoom');
       showToast(`Лобі ${roomCode} створено! Поділіться кодом з друзями`, 'success');
-
-      // Publish lobby announcement
       announceLobby();
     });
 
-    // Handle Incoming Guest Connections
     peer.on('connection', (conn) => {
       conn.on('open', () => {
         console.log('👋 Guest connected via WebRTC:', conn.peer);
@@ -599,7 +606,6 @@ document.addEventListener('DOMContentLoaded', () => {
       });
 
       conn.on('close', () => {
-        console.log('🚪 Guest disconnected:', conn.peer);
         removeGuestByConn(conn);
       });
 
@@ -609,9 +615,7 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     peer.on('error', (err) => {
-      console.error('Peer error:', err);
       if (err.type === 'unavailable-id') {
-        showToast('Кімната з таким кодом вже зайнята, генеруємо новий код...', 'error');
         hostCreateRoom(opts);
       } else {
         showToast('Помилка P2P з\'єднання: ' + err.message, 'error');
@@ -642,26 +646,25 @@ document.addEventListener('DOMContentLoaded', () => {
         isReady: false,
         score: 0,
         streak: 0,
-        correctCount: 0
+        correctCount: 0,
+        progress: 0,
+        finished: false
       };
 
       state.multi.guestConns.set(conn.peer, conn);
       room.players[guestPlayer.id] = guestPlayer;
 
-      // Send confirmation to guest with current room state
       conn.send({
         type: 'JOIN_SUCCESS',
         room: room,
         yourId: guestPlayer.id
       });
 
-      // Broadcast updated room to all
       broadcastToRoom({
         type: 'ROOM_UPDATED',
         room: room
       });
 
-      // Broadcast chat alert
       broadcastToRoom({
         type: 'CHAT_MSG',
         sender: 'Система',
@@ -703,45 +706,26 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     }
 
-    if (data.type === 'SUBMIT_ANSWER') {
-      if (room.status !== 'playing') return;
-      if (room.currentQuestionIndex !== data.questionIndex) return;
-      if (room.answers[data.playerId]) return; // already answered
-
-      const currentQ = room.questions[room.currentQuestionIndex];
-      const isCorrect = data.selectedOption === currentQ.correctIndex;
+    if (data.type === 'PLAYER_PROGRESS_UPDATE') {
       const player = room.players[data.playerId];
-
-      let points = 0;
       if (player) {
-        if (isCorrect) {
-          player.streak++;
-          player.correctCount++;
-          const timeBonus = Math.round((data.timeRemaining / room.timePerQuestion) * 50);
-          const streakBonus = Math.min(player.streak * 10, 50);
-          points = 100 + timeBonus + streakBonus;
-          player.score += points;
-        } else {
-          player.streak = 0;
-        }
+        player.score = data.score;
+        player.streak = data.streak;
+        player.correctCount = data.correctCount;
+        player.progress = data.progress;
+        player.finished = data.finished;
       }
 
-      room.answers[data.playerId] = {
-        optionIndex: data.selectedOption,
-        isCorrect,
-        points
-      };
-
-      // Broadcast answer notification count
+      // Broadcast live race update to all players
       broadcastToRoom({
-        type: 'PLAYER_ANSWERED_UPDATE',
-        answeredCount: Object.keys(room.answers).length,
-        totalPlayers: Object.keys(room.players).length
+        type: 'RACE_BOARD_UPDATE',
+        players: Object.values(room.players)
       });
 
-      // If all answered early, finish round
-      if (Object.keys(room.answers).length >= Object.keys(room.players).length) {
-        hostFinishRound();
+      // Check if all connected players finished!
+      const allFinished = Object.values(room.players).every(p => p.finished);
+      if (allFinished) {
+        hostFinishGame();
       }
     }
   }
@@ -762,10 +746,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (removedPlayer) {
       showToast(`Гравець ${removedPlayer.name} покинув кімнату`, 'info');
-      broadcastToRoom({
-        type: 'ROOM_UPDATED',
-        room: room
-      });
+      broadcastToRoom({ type: 'ROOM_UPDATED', room: room });
       broadcastToRoom({
         type: 'CHAT_MSG',
         sender: 'Система',
@@ -775,18 +756,20 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       renderWaitingRoom();
       announceLobby();
+
+      if (room.status === 'playing') {
+        const allFinished = Object.values(room.players).every(p => p.finished);
+        if (allFinished) hostFinishGame();
+      }
     }
   }
 
   function broadcastToRoom(msg) {
-    // Send to all guests
     state.multi.guestConns.forEach(conn => {
       if (conn.open) {
         conn.send(msg);
       }
     });
-
-    // Handle locally on host
     handleClientReceivedData(msg);
   }
 
@@ -803,17 +786,12 @@ document.addEventListener('DOMContentLoaded', () => {
     state.multi.isHost = false;
 
     peer.on('open', (myPeerId) => {
-      console.log('👤 Guest Peer open:', myPeerId);
       state.multi.peerId = myPeerId;
 
-      const conn = peer.connect(peerHostId, {
-        reliable: true
-      });
-
+      const conn = peer.connect(peerHostId, { reliable: true });
       state.multi.hostConn = conn;
 
       conn.on('open', () => {
-        console.log('✅ Connected to Host! Sending join request...');
         conn.send({
           type: 'JOIN_REQUEST',
           player: {
@@ -840,12 +818,11 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     peer.on('error', (err) => {
-      console.error('Peer error:', err);
       showToast('Не вдалося знайти кімнату з таким кодом!', 'error');
     });
   }
 
-  // Client Handler for all broadcast messages (used by both host and guests)
+  // Handle all broadcast events on client
   function handleClientReceivedData(data) {
     if (data.type === 'JOIN_SUCCESS') {
       state.multi.room = data.room;
@@ -880,101 +857,27 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }
 
-    if (data.type === 'GAME_STARTED') {
+    if (data.type === 'GAME_STARTED_PERSONAL') {
       countdownOverlay.style.display = 'none';
       showScreen('screenGame');
-      document.getElementById('soloNextBtnContainer').style.display = 'none';
-      document.getElementById('gameLiveIndicator').style.display = 'flex';
-      state.multi.hasAnsweredCurrent = false;
+      document.getElementById('gameLiveRaceBoard').style.display = 'block';
+      document.getElementById('soloNextBtnContainer').style.display = 'block';
+      document.getElementById('btnSoloNextQuestion').style.display = 'none';
+
+      // Load this player's own personalized questions
+      state.multi.myQuestions = data.questions;
+      state.multi.currentIndex = 0;
+      state.multi.score = 0;
+      state.multi.streak = 0;
+      state.multi.correctCount = 0;
+      state.multi.userAnswers = [];
+      state.multi.isFinished = false;
+
+      startMultiplayerIndividualQuestion();
     }
 
-    if (data.type === 'NEW_QUESTION') {
-      state.multi.currentQuestionIndex = data.questionIndex;
-      state.multi.hasAnsweredCurrent = false;
-      document.getElementById('gameExplanationBox').style.display = 'none';
-
-      document.getElementById('gameCategoryBadge').textContent = data.categoryName || 'Логіка';
-      document.getElementById('gameCurrentQNum').textContent = data.questionIndex + 1;
-      document.getElementById('gameTotalQNum').textContent = data.totalQuestions;
-      document.getElementById('gameQuestionText').textContent = data.question;
-      document.getElementById('gameAnsweredStatusText').textContent = `Відповіло: 0 / ${Object.keys(state.multi.room?.players || {}).length}`;
-
-      const optContainer = document.getElementById('gameOptionsContainer');
-      optContainer.innerHTML = '';
-      const letters = ['A', 'B', 'C', 'D'];
-
-      data.options.forEach((optText, optIdx) => {
-        const btn = document.createElement('button');
-        btn.className = 'option-btn';
-        btn.innerHTML = `
-          <span class="opt-letter">${letters[optIdx]}</span>
-          <span>${optText}</span>
-        `;
-        btn.addEventListener('click', () => {
-          handleMultiplayerAnswer(optIdx, btn, data.questionIndex);
-        });
-        optContainer.appendChild(btn);
-      });
-
-      // Synchronize Timer Bar
-      if (state.multi.timerInterval) clearInterval(state.multi.timerInterval);
-      const timerBar = document.getElementById('gameTimerBar');
-      timerBar.style.width = '100%';
-      timerBar.style.background = 'linear-gradient(90deg, var(--primary), var(--secondary))';
-
-      const totalTime = data.timeLimit;
-      const stepMs = 100;
-      let elapsed = 0;
-      state.multi.timeRemaining = totalTime;
-
-      state.multi.timerInterval = setInterval(() => {
-        elapsed += stepMs;
-        const remaining = Math.max(0, totalTime - elapsed / 1000);
-        state.multi.timeRemaining = remaining;
-
-        const pct = (remaining / totalTime) * 100;
-        timerBar.style.width = `${pct}%`;
-
-        if (pct < 30) {
-          timerBar.style.background = 'var(--danger)';
-        }
-
-        if (remaining <= 0) {
-          clearInterval(state.multi.timerInterval);
-        }
-      }, stepMs);
-    }
-
-    if (data.type === 'PLAYER_ANSWERED_UPDATE') {
-      document.getElementById('gameAnsweredStatusText').textContent = `Відповіло: ${data.answeredCount} / ${data.totalPlayers}`;
-    }
-
-    if (data.type === 'QUESTION_RESULT') {
-      if (state.multi.timerInterval) clearInterval(state.multi.timerInterval);
-
-      const allBtns = document.querySelectorAll('#gameOptionsContainer .option-btn');
-      allBtns.forEach((b, idx) => {
-        b.disabled = true;
-        if (idx === data.correctIndex) {
-          b.classList.add('correct');
-        }
-      });
-
-      if (data.explanation) {
-        document.getElementById('gameExplanationText').textContent = data.explanation;
-        document.getElementById('gameExplanationBox').style.display = 'block';
-      }
-
-      // Update current user score badge
-      const myResult = data.leaderboard.find(p => p.id === state.user.id);
-      if (myResult) {
-        document.getElementById('gameScoreBadge').textContent = `🏆 ${myResult.currentScore} очок`;
-        if (myResult.isCorrect) {
-          window.soundController.playCorrect();
-        } else {
-          window.soundController.playIncorrect();
-        }
-      }
+    if (data.type === 'RACE_BOARD_UPDATE') {
+      renderRaceBoard(data.players);
     }
 
     if (data.type === 'GAME_OVER') {
@@ -986,8 +889,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const myRankIdx = leaderboard.findIndex(p => p.id === state.user.id);
       const myStats = leaderboard[myRankIdx] || { score: 0, correctCount: 0, accuracy: 0 };
 
-      document.getElementById('resultsTitle').textContent = myRankIdx === 0 ? '👑 Ви перемогли в лобі!' : '🏁 Гра завершена!';
-      document.getElementById('resultsSubtitle').textContent = `Ваше місце в таблиці: #${myRankIdx + 1}`;
+      document.getElementById('resultsTitle').textContent = myRankIdx === 0 ? '👑 Ви перемогли в лобі!' : '🏁 Мультиплеєр завершено!';
+      document.getElementById('resultsSubtitle').textContent = `Ваше місце в турнірній таблиці: #${myRankIdx + 1}`;
 
       if (leaderboard[0]) {
         document.getElementById('podium1').style.display = 'flex';
@@ -1011,7 +914,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       document.getElementById('resTotalScore').textContent = myStats.score;
-      document.getElementById('resCorrectCount').textContent = `${myStats.correctCount} / ${data.questionCount}`;
+      document.getElementById('resCorrectCount').textContent = `${myStats.correctCount} / ${state.multi.room?.questionCount || 10}`;
       document.getElementById('resAccuracy').textContent = `${myStats.accuracy}%`;
 
       window.soundController.playVictory();
@@ -1030,7 +933,7 @@ document.addEventListener('DOMContentLoaded', () => {
         row.innerHTML = `
           <div>
             <strong>#${idx + 1} ${p.avatar} ${p.name} ${p.id === state.user.id ? '(Ви)' : ''}</strong>
-            <div style="font-size: 0.8rem; color: var(--text-muted);">Точність: ${p.accuracy}% (${p.correctCount}/${data.questionCount})</div>
+            <div style="font-size: 0.8rem; color: var(--text-muted);">Точність: ${p.accuracy}% (${p.correctCount}/${state.multi.room?.questionCount || 10})</div>
           </div>
           <div style="font-size: 1.2rem; font-weight: 800; color: var(--primary);">${p.score} очок</div>
         `;
@@ -1050,53 +953,250 @@ document.addEventListener('DOMContentLoaded', () => {
       state.multi.room = data.room;
       renderWaitingRoom();
       showScreen('screenLobbyRoom');
-      showToast('Хост повернув усіх до лобі!', 'info');
+      showToast('Хост повернув усіх до лобі для нової гри!', 'info');
     }
   }
 
-  function handleMultiplayerAnswer(selectedIdx, btnElement, qIndex) {
-    if (state.multi.hasAnsweredCurrent) return;
-    state.multi.hasAnsweredCurrent = true;
+  // -------------------------------------------------------------
+  // INDIVIDUAL MULTIPLAYER QUESTION FLOW
+  // -------------------------------------------------------------
+  function startMultiplayerIndividualQuestion() {
+    const q = state.multi.myQuestions[state.multi.currentIndex];
+    const total = state.multi.myQuestions.length;
 
-    btnElement.classList.add('selected');
-    const allBtns = document.querySelectorAll('#gameOptionsContainer .option-btn');
-    allBtns.forEach(b => {
-      if (b !== btnElement) b.disabled = true;
+    document.getElementById('gameExplanationBox').style.display = 'none';
+    document.getElementById('btnSoloNextQuestion').style.display = 'none';
+    document.getElementById('gameCategoryBadge').textContent = '🎲 Ваше унікальне питання';
+    document.getElementById('gameCurrentQNum').textContent = state.multi.currentIndex + 1;
+    document.getElementById('gameTotalQNum').textContent = total;
+    document.getElementById('gameScoreBadge').textContent = `🏆 ${state.multi.score} очок`;
+    document.getElementById('gameQuestionText').textContent = q.question;
+
+    const optContainer = document.getElementById('gameOptionsContainer');
+    optContainer.innerHTML = '';
+    const letters = ['A', 'B', 'C', 'D'];
+
+    q.options.forEach((optText, optIdx) => {
+      const btn = document.createElement('button');
+      btn.className = 'option-btn';
+      btn.innerHTML = `
+        <span class="opt-letter">${letters[optIdx]}</span>
+        <span>${optText}</span>
+      `;
+      btn.addEventListener('click', () => {
+        handleMultiplayerAnswerIndividual(optIdx, btn);
+      });
+      optContainer.appendChild(btn);
     });
 
-    const answerPayload = {
-      type: 'SUBMIT_ANSWER',
+    // Timer per question
+    if (state.multi.timerInterval) clearInterval(state.multi.timerInterval);
+    const timerBar = document.getElementById('gameTimerBar');
+
+    const timeLimit = state.multi.room?.timePerQuestion || 15;
+    state.multi.timeRemaining = timeLimit;
+    timerBar.style.width = '100%';
+    timerBar.style.background = 'linear-gradient(90deg, var(--primary), var(--secondary))';
+
+    const stepMs = 100;
+    let elapsed = 0;
+
+    state.multi.timerInterval = setInterval(() => {
+      elapsed += stepMs;
+      const remaining = Math.max(0, timeLimit - elapsed / 1000);
+      state.multi.timeRemaining = remaining;
+
+      const pct = (remaining / timeLimit) * 100;
+      timerBar.style.width = `${pct}%`;
+
+      if (pct < 30) {
+        timerBar.style.background = 'var(--danger)';
+      }
+
+      if (remaining <= 0) {
+        clearInterval(state.multi.timerInterval);
+        handleMultiplayerTimeoutIndividual();
+      }
+    }, stepMs);
+  }
+
+  function handleMultiplayerAnswerIndividual(selectedIdx, btnElement) {
+    if (state.multi.timerInterval) clearInterval(state.multi.timerInterval);
+
+    const q = state.multi.myQuestions[state.multi.currentIndex];
+    const isCorrect = selectedIdx === q.correctIndex;
+
+    const allBtns = document.querySelectorAll('#gameOptionsContainer .option-btn');
+    allBtns.forEach((b, idx) => {
+      b.disabled = true;
+      if (idx === q.correctIndex) {
+        b.classList.add('correct');
+      } else if (idx === selectedIdx && !isCorrect) {
+        b.classList.add('wrong');
+      }
+    });
+
+    const timeLimit = state.multi.room?.timePerQuestion || 15;
+    if (isCorrect) {
+      state.multi.streak++;
+      state.multi.correctCount++;
+      const timeBonus = Math.round((state.multi.timeRemaining / timeLimit) * 50);
+      const streakBonus = Math.min(state.multi.streak * 10, 50);
+      const points = 100 + timeBonus + streakBonus;
+      state.multi.score += points;
+      window.soundController.playCorrect();
+      showToast(`+${points} очок! 🔥 Серія: ${state.multi.streak}`, 'success');
+    } else {
+      state.multi.streak = 0;
+      window.soundController.playIncorrect();
+    }
+
+    state.multi.userAnswers.push({
+      question: q.question,
+      options: q.options,
+      correctIndex: q.correctIndex,
+      selectedIndex: selectedIdx,
+      isCorrect,
+      explanation: q.explanation
+    });
+
+    if (q.explanation) {
+      document.getElementById('gameExplanationText').textContent = q.explanation;
+      document.getElementById('gameExplanationBox').style.display = 'block';
+    }
+
+    document.getElementById('gameScoreBadge').textContent = `🏆 ${state.multi.score} очок`;
+    document.getElementById('btnSoloNextQuestion').style.display = 'inline-flex';
+
+    // Broadcast individual progress
+    sendMyProgressUpdate();
+  }
+
+  function handleMultiplayerTimeoutIndividual() {
+    const q = state.multi.myQuestions[state.multi.currentIndex];
+    const allBtns = document.querySelectorAll('#gameOptionsContainer .option-btn');
+    allBtns.forEach((b, idx) => {
+      b.disabled = true;
+      if (idx === q.correctIndex) {
+        b.classList.add('correct');
+      }
+    });
+
+    state.multi.streak = 0;
+    window.soundController.playIncorrect();
+    showToast('Час вичерпано!', 'error');
+
+    state.multi.userAnswers.push({
+      question: q.question,
+      options: q.options,
+      correctIndex: q.correctIndex,
+      selectedIndex: null,
+      isCorrect: false,
+      explanation: q.explanation
+    });
+
+    if (q.explanation) {
+      document.getElementById('gameExplanationText').textContent = q.explanation;
+      document.getElementById('gameExplanationBox').style.display = 'block';
+    }
+
+    document.getElementById('btnSoloNextQuestion').style.display = 'inline-flex';
+    sendMyProgressUpdate();
+  }
+
+  function sendMyProgressUpdate() {
+    const total = state.multi.myQuestions.length;
+    const currentProg = state.multi.currentIndex + 1;
+    const isFinished = currentProg >= total;
+
+    const payload = {
+      type: 'PLAYER_PROGRESS_UPDATE',
       playerId: state.user.id,
-      questionIndex: qIndex,
-      selectedOption: selectedIdx,
-      timeRemaining: state.multi.timeRemaining
+      score: state.multi.score,
+      streak: state.multi.streak,
+      correctCount: state.multi.correctCount,
+      progress: Math.min(currentProg, total),
+      finished: isFinished
     };
 
     if (state.multi.isHost) {
-      handleHostReceivedData(null, answerPayload);
+      handleHostReceivedData(null, payload);
     } else if (state.multi.hostConn) {
-      state.multi.hostConn.send(answerPayload);
+      state.multi.hostConn.send(payload);
     }
-
-    showToast('Відповідь зафіксовано! Очікуємо завершення раунду...', 'info');
   }
 
-  // Host: Start Multiplayer Game
+  function finishMyMultiplayerQuiz() {
+    state.multi.isFinished = true;
+    sendMyProgressUpdate();
+
+    document.getElementById('gameQuestionText').textContent = '🏁 Ви завершили всі свої запитання! Очікуємо фінішу інших учасників...';
+    document.getElementById('gameOptionsContainer').innerHTML = `
+      <div style="grid-column: 1/-1; text-align: center; padding: 2rem; background: var(--bg-card-hover); border-radius: var(--radius-sm);">
+        <div style="font-size: 2.5rem; margin-bottom: 0.5rem;">⏳</div>
+        <h3>Ваш результат: ${state.multi.score} очок</h3>
+        <p style="color: var(--text-muted);">Правильних відповідей: ${state.multi.correctCount} / ${state.multi.myQuestions.length}</p>
+        <p style="margin-top: 0.75rem; font-size: 0.9rem;">Дивіться живий прогрес інших гравців на шкалі нижче ⬇️</p>
+      </div>
+    `;
+    document.getElementById('soloNextBtnContainer').style.display = 'none';
+    document.getElementById('gameExplanationBox').style.display = 'none';
+  }
+
+  function renderRaceBoard(playersList) {
+    const list = playersList || [];
+    const totalQ = state.multi.room?.questionCount || 10;
+    const totalPlayers = list.length;
+    const finishedCount = list.filter(p => p.finished).length;
+
+    document.getElementById('gameRaceCountText').textContent = `${finishedCount} / ${totalPlayers} фінішували`;
+
+    const container = document.getElementById('gameRacePlayersList');
+    container.innerHTML = '';
+
+    list.sort((a, b) => b.score - a.score);
+
+    list.forEach(p => {
+      const isMe = (p.id === state.user.id);
+      const row = document.createElement('div');
+      row.className = 'race-player-row';
+      const pct = Math.round(((p.progress || 0) / totalQ) * 100);
+
+      row.innerHTML = `
+        <span class="r-avatar">${p.avatar}</span>
+        <span class="r-name">${p.name} ${isMe ? '(Ви)' : ''}</span>
+        <div class="race-bar-bg">
+          <div class="race-bar-fill" style="width: ${pct}%;"></div>
+        </div>
+        <span style="font-size: 0.75rem; color: var(--text-muted); min-width: 45px;">${p.progress || 0}/${totalQ}</span>
+        <span class="r-score">${p.score || 0}</span>
+      `;
+      container.appendChild(row);
+    });
+  }
+
+  // -------------------------------------------------------------
+  // HOST: START GAME WITH UNIQUE QUESTIONS FOR EACH PLAYER
+  // -------------------------------------------------------------
   document.getElementById('btnHostStartGame').addEventListener('click', () => {
     window.soundController.playClick();
     const room = state.multi.room;
     if (!room || !state.multi.isHost) return;
 
     const pool = window.QUIZ_QUESTIONS || [];
-    room.questions = shuffle(pool).slice(0, Math.min(room.questionCount, pool.length));
+    const qCount = room.questionCount;
     room.status = 'playing';
-    room.currentQuestionIndex = 0;
-    room.answers = {};
 
-    Object.values(room.players).forEach(p => {
-      p.score = 0;
-      p.streak = 0;
-      p.correctCount = 0;
+    // Generate unique shuffled questions for Host
+    const hostQuestions = shuffle(pool).slice(0, Math.min(qCount, pool.length));
+
+    // Generate unique shuffled questions for each connected Guest
+    state.multi.guestConns.forEach((conn, guestPeerId) => {
+      const guestQuestions = shuffle(pool).slice(0, Math.min(qCount, pool.length));
+      conn.send({
+        type: 'GAME_STARTED_PERSONAL',
+        questions: guestQuestions
+      });
     });
 
     // Start 3-second countdown
@@ -1109,83 +1209,16 @@ document.addEventListener('DOMContentLoaded', () => {
         broadcastToRoom({ type: 'START_COUNTDOWN', count: countdown });
       } else {
         clearInterval(cInterval);
-        broadcastToRoom({
-          type: 'GAME_STARTED',
-          totalQuestions: room.questions.length,
-          timePerQuestion: room.timePerQuestion
+        // Start host's own gameplay
+        handleClientReceivedData({
+          type: 'GAME_STARTED_PERSONAL',
+          questions: hostQuestions
         });
-        hostSendNextQuestion();
       }
     }, 1000);
 
     announceLobby();
   });
-
-  function hostSendNextQuestion() {
-    const room = state.multi.room;
-    if (!room || room.status !== 'playing') return;
-
-    const currentQ = room.questions[room.currentQuestionIndex];
-    if (!currentQ) {
-      hostFinishGame();
-      return;
-    }
-
-    room.answers = {};
-
-    broadcastToRoom({
-      type: 'NEW_QUESTION',
-      questionIndex: room.currentQuestionIndex,
-      totalQuestions: room.questions.length,
-      question: currentQ.question,
-      options: currentQ.options,
-      categoryName: currentQ.categoryName || 'Логіка',
-      timeLimit: room.timePerQuestion
-    });
-
-    if (state.multi.roundTimeout) clearTimeout(state.multi.roundTimeout);
-    state.multi.roundTimeout = setTimeout(() => {
-      hostFinishRound();
-    }, (room.timePerQuestion + 0.5) * 1000);
-  }
-
-  function hostFinishRound() {
-    const room = state.multi.room;
-    if (!room || room.status !== 'playing') return;
-    if (state.multi.roundTimeout) clearTimeout(state.multi.roundTimeout);
-
-    const currentQ = room.questions[room.currentQuestionIndex];
-    const roundResults = Object.values(room.players).map(p => {
-      const ans = room.answers[p.id];
-      return {
-        id: p.id,
-        name: p.name,
-        avatar: p.avatar,
-        isCorrect: ans ? ans.isCorrect : false,
-        pointsEarned: ans ? ans.points : 0,
-        currentScore: p.score,
-        streak: p.streak
-      };
-    }).sort((a, b) => b.currentScore - a.currentScore);
-
-    broadcastToRoom({
-      type: 'QUESTION_RESULT',
-      questionIndex: room.currentQuestionIndex,
-      correctIndex: currentQ.correctIndex,
-      explanation: currentQ.explanation,
-      leaderboard: roundResults
-    });
-
-    setTimeout(() => {
-      if (!state.multi.room || state.multi.room.status !== 'playing') return;
-      state.multi.room.currentQuestionIndex++;
-      if (state.multi.room.currentQuestionIndex < state.multi.room.questions.length) {
-        hostSendNextQuestion();
-      } else {
-        hostFinishGame();
-      }
-    }, 4500);
-  }
 
   function hostFinishGame() {
     const room = state.multi.room;
@@ -1198,13 +1231,12 @@ document.addEventListener('DOMContentLoaded', () => {
       avatar: p.avatar,
       score: p.score,
       correctCount: p.correctCount,
-      accuracy: Math.round((p.correctCount / (room.questions.length || 1)) * 100)
+      accuracy: Math.round((p.correctCount / (room.questionCount || 1)) * 100)
     })).sort((a, b) => b.score - a.score);
 
     broadcastToRoom({
       type: 'GAME_OVER',
-      leaderboard: finalLeaderboard,
-      questionCount: room.questions.length
+      leaderboard: finalLeaderboard
     });
 
     announceLobby();
@@ -1215,12 +1247,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!room) return;
 
     room.status = 'waiting';
-    room.currentQuestionIndex = 0;
-    room.answers = {};
     Object.values(room.players).forEach(p => {
       p.score = 0;
       p.streak = 0;
       p.correctCount = 0;
+      p.progress = 0;
+      p.finished = false;
       p.isReady = p.isHost;
     });
 
@@ -1232,7 +1264,6 @@ document.addEventListener('DOMContentLoaded', () => {
     announceLobby();
   }
 
-  // Toggle ready status
   document.getElementById('btnToggleReady').addEventListener('click', () => {
     window.soundController.playClick();
     if (state.multi.hostConn) {
@@ -1243,7 +1274,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // Room Chat
   document.getElementById('formRoomChat').addEventListener('submit', (e) => {
     e.preventDefault();
     const input = document.getElementById('inputChatMsg');
@@ -1285,7 +1315,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!room) return;
 
     document.getElementById('roomTitleText').textContent = room.name;
-    document.getElementById('roomCategoryText').textContent = 'Логічні загадки';
+    document.getElementById('roomCategoryText').textContent = 'Логічні загадки (Унікальні питання для кожного)';
     document.getElementById('roomQuestionCountText').textContent = `${room.questionCount} питань`;
     document.getElementById('roomTimeText').textContent = `${room.timePerQuestion}с`;
     document.getElementById('roomCodeDisplay').textContent = room.code;
@@ -1380,9 +1410,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // -------------------------------------------------------------
-  // LOBBY DISCOVERY & ANNOUNCEMENTS (BROADCASTCHANNEL & STORAGE)
-  // -------------------------------------------------------------
   function announceLobby() {
     const room = state.multi.room;
     if (!room || !state.multi.isHost || room.isPrivate) return;
@@ -1403,7 +1430,6 @@ document.addEventListener('DOMContentLoaded', () => {
       broadcast.postMessage({ type: 'LOBBY_ANNOUNCE', lobby: lobbyInfo });
     }
 
-    // Also store in localStorage active lobbies cache
     try {
       const lobbies = JSON.parse(localStorage.getItem('qa_active_lobbies') || '{}');
       lobbies[room.code] = lobbyInfo;
@@ -1458,7 +1484,6 @@ document.addEventListener('DOMContentLoaded', () => {
       const stored = JSON.parse(localStorage.getItem('qa_active_lobbies') || '{}');
       const now = Date.now();
       Object.values(stored).forEach(l => {
-        // Keep active within 5 minutes
         if (now - l.timestamp < 5 * 60 * 1000) {
           list.push(l);
         }
